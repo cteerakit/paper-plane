@@ -165,14 +165,60 @@ function NewTabButton({
   );
 }
 
+/**
+ * Pointer is in the pin strip, or in the separator gap above the open list.
+ * That gap must count as the pin target — otherwise closestCenter flickers
+ * between pinned icons and open rows and the pin UI flashes.
+ */
+function collisionForPinnedZoneIncludingGap(
+  args: Parameters<CollisionDetection>[0],
+): ReturnType<CollisionDetection>[number] | undefined {
+  const pointerHits = pointerWithin(args);
+  const direct = pointerHits.find((c) => c.id === PINNED_DROPPABLE_ID);
+  if (direct) return direct;
+
+  const pointer = args.pointerCoordinates;
+  if (!pointer) return undefined;
+
+  const pinContainer = args.droppableContainers.find(
+    (c) => c.id === PINNED_DROPPABLE_ID,
+  );
+  const openContainer = args.droppableContainers.find(
+    (c) => c.id === OPEN_DROPPABLE_ID,
+  );
+  const pinRect = pinContainer?.rect.current;
+  const openRect = openContainer?.rect.current;
+  if (!pinContainer || !pinRect || !openRect) return undefined;
+
+  // Between pin strip top and open list top (includes gap + separator).
+  if (pointer.y >= pinRect.top && pointer.y < openRect.top) {
+    return {
+      id: PINNED_DROPPABLE_ID,
+      data: { droppableContainer: pinContainer, value: 0 },
+    };
+  }
+  return undefined;
+}
+
 const tabsCollisionDetection: CollisionDetection = (args) => {
   const activeType = args.active.data.current?.type as string | undefined;
   const pointerHits = pointerWithin(args);
 
-  // Unpinned → pin-zone wins so dropping on the strip (or a pinned icon) pins.
+  // Unpinned → pin-zone wins (strip, icons, or separator gap above open list).
   if (activeType === 'open-tab') {
-    const overPinned = pointerHits.find((c) => c.id === PINNED_DROPPABLE_ID);
+    const overPinned = collisionForPinnedZoneIncludingGap(args);
     if (overPinned) return [overPinned];
+
+    // Reorder only among open rows — never snap to pinned icons in the gap.
+    return closestCenter({
+      ...args,
+      droppableContainers: args.droppableContainers.filter(
+        (c) =>
+          c.id !== PINNED_DROPPABLE_ID &&
+          c.id !== OPEN_DROPPABLE_ID &&
+          c.data.current?.type !== 'pinned-tab',
+      ),
+    });
   }
 
   // Pinned → open-zone wins so dropping on the open list unpins.
@@ -1518,6 +1564,8 @@ function TabsSectionInner({
   tabsRef.current = tabs;
   const pinnedListRef = useRef<HTMLUListElement | null>(null);
   const pinnedDropIndexRef = useRef<number | null>(null);
+  /** Mirrors overPinned — sticky across separator / remount frames. */
+  const overPinnedRef = useRef(false);
   /** Pointer client pos at drag start — overlay center is wrong for wide open-tab rows. */
   const pointerOriginRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -1839,11 +1887,23 @@ function TabsSectionInner({
       overId === PINNED_DROPPABLE_ID ||
       (typeof overId === 'number' &&
         tabsRef.current.some((t) => t.id === overId && t.pinned));
+    const overOpenZone =
+      overId === OPEN_DROPPABLE_ID ||
+      (typeof overId === 'number' &&
+        tabsRef.current.some((t) => t.id === overId && !t.pinned));
 
-    setOverPinned(draggingUnpinned && overPinnedZone);
+    // Stick while over the separator / null frames; only leave for the open list.
+    let nextOverPinned = false;
+    if (draggingUnpinned) {
+      if (overPinnedZone) nextOverPinned = true;
+      else if (overOpenZone) nextOverPinned = false;
+      else nextOverPinned = overPinnedRef.current;
+    }
+    overPinnedRef.current = nextOverPinned;
+    setOverPinned(nextOverPinned);
     setOverOpen(event.over?.id === OPEN_DROPPABLE_ID);
 
-    if (!draggingUnpinned || !overPinnedZone) {
+    if (!draggingUnpinned || !nextOverPinned) {
       pinnedDropIndexRef.current = null;
       setPinnedDropIndex(null);
       return;
@@ -1873,6 +1933,7 @@ function TabsSectionInner({
   function handleDragCancel() {
     setActiveDragTab(null);
     setRevealEmptyPinZone(false);
+    overPinnedRef.current = false;
     setOverPinned(false);
     setOverOpen(false);
     pinnedDropIndexRef.current = null;
@@ -1890,6 +1951,7 @@ function TabsSectionInner({
 
     setActiveDragTab(null);
     setRevealEmptyPinZone(false);
+    overPinnedRef.current = false;
     setOverPinned(false);
     setOverOpen(false);
     pinnedDropIndexRef.current = null;
@@ -2088,7 +2150,13 @@ function TabsSectionInner({
           >
             <div className="flex flex-col gap-1.5">
             {showPinnedSection && (
-              <PinnedDropZone highlight={isDraggingUnpinned && overPinned}>
+              <PinnedDropZone
+                // Section chrome only when empty — with pins, the insert
+                // placeholder is the sole drop affordance (no full-strip wash).
+                highlight={
+                  pinnedTabs.length === 0 && isDraggingUnpinned && overPinned
+                }
+              >
                 {pinnedTabs.length === 0 ? (
                   <PinnedEmptyDropHint active={overPinned} />
                 ) : (
