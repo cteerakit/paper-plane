@@ -40,6 +40,7 @@ import {
   Archive,
   ChevronDown,
   Maximize,
+  Minimize,
   Plus,
   Volume2,
   VolumeX,
@@ -94,6 +95,7 @@ import {
   renameOpenTabTitle,
   setTabMuted,
   setTabPinned,
+  subscribeFocusedWindowFullscreen,
   toggleFocusedWindowFullscreen,
   updateTabUrl,
   type OpenTab,
@@ -594,20 +596,34 @@ function RecentlyClosedMenu({
 function FullscreenButton({ enabled }: { enabled: boolean }) {
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) {
+      setFullscreen(false);
+      return;
+    }
+    return subscribeFocusedWindowFullscreen(setFullscreen);
+  }, [enabled]);
 
   if (!enabled) return null;
 
   async function handleClick() {
     setBusy(true);
     setTooltipOpen(false);
+    const next = !fullscreen;
+    setFullscreen(next);
     try {
       await toggleFocusedWindowFullscreen();
     } catch (err) {
+      setFullscreen(!next);
       console.error('Failed to toggle fullscreen', err);
     } finally {
       setBusy(false);
     }
   }
+
+  const label = fullscreen ? 'Exit full screen' : 'Full screen';
 
   return (
     <Tooltip open={tooltipOpen}>
@@ -616,7 +632,8 @@ function FullscreenButton({ enabled }: { enabled: boolean }) {
           type="button"
           variant="ghost"
           size="icon"
-          aria-label="Full screen"
+          aria-label={label}
+          aria-pressed={fullscreen}
           disabled={busy}
           onClick={() => {
             void handleClick();
@@ -628,10 +645,14 @@ function FullscreenButton({ enabled }: { enabled: boolean }) {
             setTooltipOpen(false);
           }}
         >
-          <Maximize className="size-4" aria-hidden />
+          {fullscreen ? (
+            <Minimize className="size-4" aria-hidden />
+          ) : (
+            <Maximize className="size-4" aria-hidden />
+          )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Full screen</TooltipContent>
+      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
 }

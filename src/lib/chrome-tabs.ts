@@ -79,14 +79,109 @@ export async function activateTab(tabId: number, windowId: number): Promise<void
 }
 
 /**
- * Toggle fullscreen on the last-focused normal browser window.
- * Exits to `normal` when already fullscreen.
+ * Last non-fullscreen state per window, so exiting fullscreen can restore
+ * maximized (or normal) instead of always collapsing to a restored window.
+ */
+const fullscreenRestoreStateByWindowId = new Map<number, 'normal' | 'maximized'>();
+
+async function getTargetNormalWindow(): Promise<Browser.windows.Window | undefined> {
+  try {
+    const current = await browser.windows.getCurrent();
+    if (current.type === 'normal' && typeof current.id === 'number') {
+      return current;
+    }
+  } catch {
+    // Side panel / callers without a current window fall through.
+  }
+  try {
+    return await browser.windows.getLastFocused({ windowTypes: ['normal'] });
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Toggle native browser-window fullscreen (same state as F11).
+ * Remembers maximized vs normal so exit restores the prior window mode.
+ *
+ * Note: Chromium’s `windows.update({ state: 'fullscreen' })` calls `Restore()`
+ * when the window is maximized before entering fullscreen, so the transition
+ * animates differently from pressing F11.
  */
 export async function toggleFocusedWindowFullscreen(): Promise<void> {
-  const win = await browser.windows.getLastFocused({ windowTypes: ['normal'] });
-  if (typeof win.id !== 'number') return;
-  const nextState = win.state === 'fullscreen' ? 'normal' : 'fullscreen';
-  await browser.windows.update(win.id, { state: nextState });
+  const win = await getTargetNormalWindow();
+  if (!win || typeof win.id !== 'number') return;
+
+  if (win.state === 'fullscreen') {
+    const restore = fullscreenRestoreStateByWindowId.get(win.id) ?? 'maximized';
+    fullscreenRestoreStateByWindowId.delete(win.id);
+    await browser.windows.update(win.id, { state: restore, focused: true });
+    return;
+  }
+
+  const prior: 'normal' | 'maximized' =
+    win.state === 'maximized' ? 'maximized' : 'normal';
+  fullscreenRestoreStateByWindowId.set(win.id, prior);
+
+  // Enter fullscreen in one step. Going via `normal` first causes the
+  // restore-sized intermediate frame users see as a weird animation.
+  await browser.windows.update(win.id, { state: 'fullscreen', focused: true });
+}
+
+/** Whether the side panel’s host (or last-focused normal) window is fullscreen. */
+export async function isFocusedWindowFullscreen(): Promise<boolean> {
+  const win = await getTargetNormalWindow();
+  return win?.state === 'fullscreen';
+}
+
+/**
+ * Subscribe to fullscreen changes for the target normal window.
+ * Returns an unsubscribe function.
+ */
+export function subscribeFocusedWindowFullscreen(
+  listener: (fullscreen: boolean) => void,
+): () => void {
+  let cancelled = false;
+
+  const emit = () => {
+    void isFocusedWindowFullscreen().then((fullscreen) => {
+      if (!cancelled) listener(fullscreen);
+    });
+  };
+
+  emit();
+
+  const onFocusChanged = () => {
+    emit();
+  };
+  browser.windows.onFocusChanged.addListener(onFocusChanged);
+
+  // Bounds/state changes (including F11 / Esc) — available in modern Chrome.
+  const onBoundsChanged =
+    typeof browser.windows.onBoundsChanged?.addListener === 'function'
+      ? () => {
+          emit();
+        }
+      : null;
+  if (onBoundsChanged) {
+    browser.windows.onBoundsChanged.addListener(onBoundsChanged);
+  }
+
+  const onVisibility = () => {
+    if (document.visibilityState === 'visible') emit();
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+  window.addEventListener('focus', onVisibility);
+
+  return () => {
+    cancelled = true;
+    browser.windows.onFocusChanged.removeListener(onFocusChanged);
+    if (onBoundsChanged) {
+      browser.windows.onBoundsChanged.removeListener(onBoundsChanged);
+    }
+    document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('focus', onVisibility);
+  };
 }
 
 /** Open a new blank tab in the current / last-focused window. */
