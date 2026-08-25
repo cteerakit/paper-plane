@@ -2,7 +2,13 @@
 
 Chrome side panel for your open tabs, email, calendar, tasks, notes, and an overview of your day.
 
+**Homepage:** [cteerakit.github.io/paper-plane](https://cteerakit.github.io/paper-plane) (static site in [`docs/`](docs/))
+
 Built with [WXT](https://wxt.dev), React, Tailwind CSS v4, and shadcn/ui.
+
+### GitHub Pages
+
+The landing page lives in [`docs/`](docs/). To publish: repo **Settings → Pages → Deploy from branch → `main` → `/docs`**.
 
 ## License
 

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Policy — Paper Plane</title>
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Outfit:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="legal-page">
+      <a class="legal-back" href="index.html">← Paper Plane</a>
+
+      <h1>Privacy Policy</h1>
+      <p class="meta"><strong>Paper Plane</strong><br />Last updated: August 25, 2026</p>
+
+      <p>
+        Paper Plane (“the Extension”) is a Chrome side panel developed by Teerakit Chantrakul (“we,”
+        “us”). This policy explains what information the Extension accesses and how it is used. By
+        using Paper Plane, you agree to this policy.
+      </p>
+
+      <h2>Summary</h2>
+      <p>
+        Paper Plane runs in your browser. It does not operate a separate backend that collects your
+        mail, calendar, tasks, or browsing data. Google account data is requested only so the
+        Extension can show it to you locally, and Chrome APIs are used only to power features you
+        turn on in the side panel.
+      </p>
+
+      <h2>Information we access</h2>
+      <p>Depending on which features you use, Paper Plane may access:</p>
+      <ul>
+        <li>
+          <strong>Google account profile</strong> — name, email address, and profile picture when you
+          connect Google (OpenID, email, profile).
+        </li>
+        <li>
+          <strong>Gmail</strong> — read-only access to message metadata and content needed to list
+          unread mail and Today’s overview (<code>gmail.readonly</code>).
+        </li>
+        <li>
+          <strong>Google Calendar</strong> — read-only access to event details for upcoming events
+          (<code>calendar.events.readonly</code>).
+        </li>
+        <li>
+          <strong>Google Tasks</strong> — access to create, read, update, and complete tasks
+          (<code>tasks</code>).
+        </li>
+        <li>
+          <strong>Chrome tabs &amp; sessions</strong> — open tabs, recently closed tabs, and related
+          metadata for the Tabs feature.
+        </li>
+        <li>
+          <strong>Bookmarks &amp; favicons</strong> — as needed to display and manage tab-related UI.
+        </li>
+        <li>
+          <strong>Notes (Google Keep)</strong> — an embedded Keep experience that uses your existing
+          Chrome Google session; it does not use the separate OAuth “Connect Google” flow.
+        </li>
+        <li>
+          <strong>Extension settings</strong> — preferences such as theme, navigation layout, enabled
+          apps, and last viewed page, stored in Chrome extension storage on your device.
+        </li>
+      </ul>
+
+      <h2>How we use information</h2>
+      <p>Accessed data is used only to:</p>
+      <ul>
+        <li>Display mail, calendar, tasks, tabs, notes, and Today in the side panel</li>
+        <li>Remember your settings and last opened view</li>
+        <li>Cache recent API responses on your device to load panels faster</li>
+        <li>Authenticate with Google when you choose to connect your account</li>
+      </ul>
+      <p>We do not sell your personal information or use it for advertising.</p>
+
+      <h2>Storage and retention</h2>
+      <p>
+        OAuth tokens are managed by Chrome’s identity APIs. Settings and short-lived caches of mail,
+        calendar, tasks, and Today data are stored locally in the Extension’s storage on your device.
+        Signing out revokes the Google token used by the Extension and clears the in-panel account
+        state. Uninstalling the Extension removes its local storage.
+      </p>
+
+      <h2>Data sharing</h2>
+      <p>
+        Paper Plane does not send your Google Workspace content or tab data to our own servers.
+        Requests for Google data go to Google’s APIs under Google’s terms and privacy policy.
+        Embedded Google products (such as Keep) are provided by Google and subject to Google’s
+        policies.
+      </p>
+
+      <h2>Permissions</h2>
+      <p>
+        The Extension’s Chrome permissions (including side panel, identity, storage, tabs, sessions,
+        bookmarks, scripting, and host access needed for embeds and tab tools) are declared in the
+        extension manifest and are limited to features described in the product.
+      </p>
+
+      <h2>Children</h2>
+      <p>
+        Paper Plane is not directed at children under 13, and we do not knowingly collect personal
+        information from children.
+      </p>
+
+      <h2>Changes</h2>
+      <p>
+        We may update this policy from time to time. The “Last updated” date at the top will change
+        when we do. Continued use of the Extension after an update means you accept the revised
+        policy.
+      </p>
+
+      <h2>Contact</h2>
+      <p>
+        Questions about privacy:
+        <a href="https://github.com/cteerakit/paper-plane/issues">open an issue on GitHub</a>.
+      </p>
+    </main>
+  </body>
+</html>
