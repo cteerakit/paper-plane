@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { AlertCircle, ChevronRight } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button, listRowButtonClass } from '@/components/ui/button';
@@ -31,6 +31,32 @@ interface TodaySectionProps {
 
 const EMPTY_SNAPSHOT: TodaySnapshot = { events: [], tasks: [], threads: [] };
 
+type TodaySectionId = 'calendar' | 'tasks' | 'email';
+
+const COLLAPSED_STORAGE_KEY = 'flyout.today.collapsedSections';
+
+type CollapsedMap = Partial<Record<TodaySectionId, boolean>>;
+
+function loadCollapsedSections(): CollapsedMap {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed as CollapsedMap;
+  } catch {
+    return {};
+  }
+}
+
+function persistCollapsedSections(map: CollapsedMap) {
+  try {
+    localStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore quota / private-mode failures.
+  }
+}
+
 function formatEventWhen(start: string): string {
   if (!start) return '';
   if (start.length === 10) return 'All day';
@@ -57,11 +83,40 @@ function formatDue(due: string): string {
   return `Overdue · ${new Date(y!, m! - 1, d!).toLocaleDateString()}`;
 }
 
-function SectionHeading({ children }: { children: string }) {
+function CollapsibleSection({
+  id,
+  title,
+  expanded,
+  onToggle,
+  children,
+}: {
+  id: TodaySectionId;
+  title: string;
+  expanded: boolean;
+  onToggle: (id: TodaySectionId) => void;
+  children: ReactNode;
+}) {
   return (
-    <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-      {children}
-    </h2>
+    <section className="flex flex-col gap-2">
+      <h2>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => onToggle(id)}
+          className="text-muted-foreground flex w-full cursor-pointer items-center gap-1 text-left text-xs font-medium tracking-wide uppercase"
+        >
+          <ChevronRight
+            className={cn(
+              'size-3.5 shrink-0 transition-transform',
+              expanded && 'rotate-90',
+            )}
+            aria-hidden
+          />
+          {title}
+        </button>
+      </h2>
+      {expanded && children}
+    </section>
   );
 }
 
@@ -87,6 +142,7 @@ export function TodaySection({
     GOOGLE_CACHE_STALE_MS,
   );
   const [completingKey, setCompletingKey] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<CollapsedMap>(loadCollapsedSections);
 
   useEffect(() => {
     return subscribeTaskCompleted((listId, taskId) => {
@@ -96,6 +152,14 @@ export function TodaySection({
       }));
     });
   }, [setData]);
+
+  function toggleSection(id: TodaySectionId) {
+    setCollapsed((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      persistCollapsedSections(next);
+      return next;
+    });
+  }
 
   async function handleComplete(task: TaskItem) {
     const key = `${task.listId}:${task.id}`;
@@ -138,8 +202,12 @@ export function TodaySection({
 
       {showBody && (
         <>
-          <section className="flex flex-col gap-2">
-            <SectionHeading>Calendar</SectionHeading>
+          <CollapsibleSection
+            id="calendar"
+            title="Calendar"
+            expanded={!collapsed.calendar}
+            onToggle={toggleSection}
+          >
             {events.length === 0 ? (
               <p className="text-muted-foreground text-sm">No events today.</p>
             ) : (
@@ -177,10 +245,14 @@ export function TodaySection({
                 ))}
               </ul>
             )}
-          </section>
+          </CollapsibleSection>
 
-          <section className="flex flex-col gap-2">
-            <SectionHeading>Task</SectionHeading>
+          <CollapsibleSection
+            id="tasks"
+            title="Task"
+            expanded={!collapsed.tasks}
+            onToggle={toggleSection}
+          >
             {tasks.length === 0 ? (
               <p className="text-muted-foreground text-sm">No tasks due today.</p>
             ) : (
@@ -209,10 +281,14 @@ export function TodaySection({
                 ))}
               </ul>
             )}
-          </section>
+          </CollapsibleSection>
 
-          <section className="flex flex-col gap-2">
-            <SectionHeading>Email</SectionHeading>
+          <CollapsibleSection
+            id="email"
+            title="Unread emails"
+            expanded={!collapsed.email}
+            onToggle={toggleSection}
+          >
             {threads.length === 0 ? (
               <p className="text-muted-foreground text-sm">No messages today.</p>
             ) : (
@@ -247,7 +323,7 @@ export function TodaySection({
                 ))}
               </ul>
             )}
-          </section>
+          </CollapsibleSection>
         </>
       )}
     </div>
