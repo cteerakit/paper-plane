@@ -2,16 +2,16 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
-/** Elevated list cards (tasks, calendar). Hairline in light; fill-only in dark. */
+/** List cards (tasks, calendar). Hairline border in light; fill-only in dark. */
 const cardSurfaceClass =
-  'bg-card rounded-lg border p-3 text-sm shadow-sm dark:border-transparent';
+  'bg-card rounded-lg border p-3 text-sm dark:border-transparent';
 
 function Card({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="card"
       className={cn(
-        'bg-card text-card-foreground flex flex-col gap-6 rounded-xl border py-6 shadow-sm dark:border-transparent',
+        'bg-card text-card-foreground flex flex-col gap-6 rounded-xl border py-6 dark:border-transparent',
         className,
       )}
       {...props}
