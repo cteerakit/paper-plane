@@ -61,15 +61,18 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -85,19 +88,28 @@ import {
   canRenameTabTitle,
   closeOpenTab,
   createNewTab,
+  duplicateOpenTab,
   listOpenTabs,
   moveOpenTab,
   moveOpenTabs,
   normalizeTabUrl,
+  openTabInSplitView,
   renameOpenTabTitle,
   setTabMuted,
   setTabPinned,
   updateTabUrl,
   type OpenTab,
+  type SplitViewLayout,
 } from '@/lib/chrome-tabs';
 import { getGoogleFaviconUrl, resolveFaviconSrc } from '@/lib/favicon';
 import type { NewTabPosition } from '@/lib/settings';
 import { cn, formatRelativeTime } from '@/lib/utils';
+
+function newTabShortcutLabel() {
+  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+    ? '⌘T'
+    : 'Ctrl+T';
+}
 
 interface TabsSectionProps {
   enabled: boolean;
@@ -137,11 +149,6 @@ function NewTabButton({
   onClick: () => void;
   className?: string;
 }) {
-  const shortcut =
-    typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
-      ? '⌘T'
-      : 'Ctrl+T';
-
   return (
     <button
       type="button"
@@ -155,7 +162,7 @@ function NewTabButton({
         className="text-muted-foreground ml-auto shrink-0 text-xs opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
         aria-hidden
       >
-        {shortcut}
+        {newTabShortcutLabel()}
       </span>
     </button>
   );
@@ -332,6 +339,49 @@ async function copyTabUrl(url: string): Promise<void> {
   await navigator.clipboard.writeText(trimmed);
 }
 
+function OpenInSplitViewSubmenu({
+  disabled,
+  onSelect,
+}: {
+  disabled?: boolean;
+  onSelect: (layout: SplitViewLayout) => void;
+}) {
+  // Flat disabled item — a SubTrigger can still open on hover when "disabled".
+  if (disabled) {
+    return (
+      <ContextMenuItem className="cursor-pointer" disabled>
+        Open in Split View
+      </ContextMenuItem>
+    );
+  }
+
+  return (
+    <ContextMenuSub>
+      <ContextMenuSubTrigger className="cursor-pointer">
+        Open in Split View
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent className="min-w-0 w-max">
+        <ContextMenuItem
+          className="cursor-pointer"
+          onSelect={() => {
+            onSelect('sideBySide');
+          }}
+        >
+          Side-by-side
+        </ContextMenuItem>
+        <ContextMenuItem
+          className="cursor-pointer"
+          onSelect={() => {
+            onSelect('stacked');
+          }}
+        >
+          Stacked
+        </ContextMenuItem>
+      </ContextMenuSubContent>
+    </ContextMenuSub>
+  );
+}
+
 function AddMenu({
   disabled,
   onNewTab,
@@ -383,6 +433,7 @@ function AddMenu({
           >
             <Plus aria-hidden />
             New tab
+            <DropdownMenuShortcut>{newTabShortcutLabel()}</DropdownMenuShortcut>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -390,7 +441,7 @@ function AddMenu({
   );
 }
 
-function RecentlyClosedPopover({
+function RecentlyClosedMenu({
   active,
   enabled,
 }: {
@@ -398,6 +449,7 @@ function RecentlyClosedPopover({
   enabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   const [closedTabs, setClosedTabs] = useState<ClosedTab[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
@@ -470,66 +522,73 @@ function RecentlyClosedPopover({
 
   return (
     <div className="absolute bottom-3 left-3 z-20">
-      <Popover open={open} onOpenChange={setOpen}>
-        <Tooltip>
+      <DropdownMenu
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          setTooltipOpen(false);
+        }}
+      >
+        <Tooltip open={tooltipOpen && !open}>
           <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
+            <DropdownMenuTrigger asChild>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
                 aria-label="Recently closed"
+                onPointerEnter={() => {
+                  if (!open) setTooltipOpen(true);
+                }}
+                onPointerLeave={() => {
+                  setTooltipOpen(false);
+                }}
               >
                 <Archive className="size-4" aria-hidden />
               </Button>
-            </PopoverTrigger>
+            </DropdownMenuTrigger>
           </TooltipTrigger>
           <TooltipContent>Recently Closed</TooltipContent>
         </Tooltip>
-        <PopoverContent
+        <DropdownMenuContent
           side="top"
           align="start"
           sideOffset={8}
-          className="w-72 p-2"
+          className="w-72 p-1"
         >
-          {error && <p className="text-destructive px-2 py-3 text-sm">{error}</p>}
+          {error && (
+            <p className="text-destructive px-2 py-3 text-sm" role="status">
+              {error}
+            </p>
+          )}
           {!error && closedTabs.length === 0 && (
-            <p className="text-muted-foreground px-2 py-3 text-sm">No recently closed tabs.</p>
+            <p className="text-muted-foreground px-2 py-3 text-sm" role="status">
+              No recently closed tabs.
+            </p>
           )}
-          {closedTabs.length > 0 && (
-            <ul className="space-y-0.5">
-              {closedTabs.map((tab) => {
-                const closedAgo = formatRelativeTime(tab.lastModified);
-                return (
-                  <li key={tab.sessionId}>
-                    <button
-                      type="button"
-                      disabled={restoringId === tab.sessionId}
-                      className={cn(
-                        openTabRowClass,
-                        'w-full cursor-pointer disabled:pointer-events-none disabled:opacity-50',
-                      )}
-                      onClick={() => {
-                        void handleRestore(tab);
-                      }}
-                    >
-                      <ClosedTabFavicon tab={tab} />
-                      <p className="min-w-0 flex-1 truncate font-medium leading-snug">
-                        <span className="truncate">{tab.title}</span>
-                      </p>
-                      {closedAgo && (
-                        <span className="text-muted-foreground ml-auto shrink-0 text-right text-xs">
-                          {closedAgo}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </PopoverContent>
-      </Popover>
+          {closedTabs.map((tab) => {
+            const closedAgo = formatRelativeTime(tab.lastModified);
+            return (
+              <DropdownMenuItem
+                key={tab.sessionId}
+                disabled={restoringId === tab.sessionId}
+                className="gap-2.5"
+                onSelect={() => {
+                  void handleRestore(tab);
+                }}
+              >
+                <ClosedTabFavicon tab={tab} />
+                <span className="min-w-0 flex-1 truncate font-medium">{tab.title}</span>
+                {closedAgo && (
+                  <span className="text-muted-foreground ml-auto shrink-0 text-xs">
+                    {closedAgo}
+                  </span>
+                )}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -754,6 +813,8 @@ function TabPane({
   onClose,
   onPin,
   onMute,
+  onDuplicate,
+  onOpenInSplitView,
   onRename,
   onRenamingChange,
 }: {
@@ -767,6 +828,8 @@ function TabPane({
   onClose: (tab: OpenTab) => void;
   onPin: (tab: OpenTab) => void;
   onMute: (tab: OpenTab) => void;
+  onDuplicate: (tab: OpenTab) => void;
+  onOpenInSplitView: (tab: OpenTab, layout: SplitViewLayout) => void;
   onRename: (tab: OpenTab, title: string) => void | Promise<void>;
   onRenamingChange?: (renaming: boolean) => void;
 }) {
@@ -1000,6 +1063,21 @@ function TabPane({
           className="cursor-pointer"
           disabled={rowBusy}
           onSelect={() => {
+            void onDuplicate(tab);
+          }}
+        >
+          Duplicate
+        </ContextMenuItem>
+        <OpenInSplitViewSubmenu
+          disabled={rowBusy || variant === 'pane' || tab.splitViewId != null}
+          onSelect={(layout) => {
+            void onOpenInSplitView(tab, layout);
+          }}
+        />
+        <ContextMenuItem
+          className="cursor-pointer"
+          disabled={rowBusy}
+          onSelect={() => {
             void onPin(tab);
           }}
         >
@@ -1028,6 +1106,8 @@ function SortableTabRow({
   onClose,
   onPin,
   onMute,
+  onDuplicate,
+  onOpenInSplitView,
   onRename,
 }: {
   tab: OpenTab;
@@ -1036,6 +1116,8 @@ function SortableTabRow({
   onClose: (tab: OpenTab) => void;
   onPin: (tab: OpenTab) => void;
   onMute: (tab: OpenTab) => void;
+  onDuplicate: (tab: OpenTab) => void;
+  onOpenInSplitView: (tab: OpenTab, layout: SplitViewLayout) => void;
   onRename: (tab: OpenTab, title: string) => void | Promise<void>;
 }) {
   const [isRenaming, setIsRenaming] = useState(false);
@@ -1065,6 +1147,8 @@ function SortableTabRow({
         onClose={onClose}
         onPin={onPin}
         onMute={onMute}
+        onDuplicate={onDuplicate}
+        onOpenInSplitView={onOpenInSplitView}
         onRename={onRename}
         onRenamingChange={setIsRenaming}
       />
@@ -1079,6 +1163,8 @@ function SortableSplitTabRow({
   onClose,
   onPin,
   onMute,
+  onDuplicate,
+  onOpenInSplitView,
   onRename,
 }: {
   tabs: OpenTab[];
@@ -1087,6 +1173,8 @@ function SortableSplitTabRow({
   onClose: (tab: OpenTab) => void;
   onPin: (tab: OpenTab) => void;
   onMute: (tab: OpenTab) => void;
+  onDuplicate: (tab: OpenTab) => void;
+  onOpenInSplitView: (tab: OpenTab, layout: SplitViewLayout) => void;
   onRename: (tab: OpenTab, title: string) => void | Promise<void>;
 }) {
   const primary = tabs[0]!;
@@ -1141,6 +1229,8 @@ function SortableSplitTabRow({
             onClose={onClose}
             onPin={onPin}
             onMute={onMute}
+            onDuplicate={onDuplicate}
+            onOpenInSplitView={onOpenInSplitView}
             onRename={onRename}
             onRenamingChange={(next) => handlePaneRenamingChange(tab.id, next)}
           />
@@ -1157,6 +1247,8 @@ function SortablePinnedTab({
   onActivate,
   onUnpin,
   onMute,
+  onDuplicate,
+  onOpenInSplitView,
   onRename,
   onEdit,
 }: {
@@ -1167,6 +1259,8 @@ function SortablePinnedTab({
   onActivate: (tab: OpenTab) => void;
   onUnpin: (tab: OpenTab) => void;
   onMute: (tab: OpenTab) => void;
+  onDuplicate: (tab: OpenTab) => void;
+  onOpenInSplitView: (tab: OpenTab, layout: SplitViewLayout) => void;
   onRename: (tab: OpenTab) => void;
   onEdit: (tab: OpenTab) => void;
 }) {
@@ -1274,6 +1368,21 @@ function SortablePinnedTab({
           >
             {tab.muted ? 'Unmute' : 'Mute'}
           </ContextMenuItem>
+          <ContextMenuItem
+            className="cursor-pointer"
+            disabled={disabled}
+            onSelect={() => {
+              void onDuplicate(tab);
+            }}
+          >
+            Duplicate
+          </ContextMenuItem>
+          <OpenInSplitViewSubmenu
+            disabled={disabled || tab.splitViewId != null}
+            onSelect={(layout) => {
+              void onOpenInSplitView(tab, layout);
+            }}
+          />
           <ContextMenuItem
             className="cursor-pointer"
             disabled={disabled}
@@ -1415,6 +1524,11 @@ function TabsSectionInner({
   const [pinnedDropIndex, setPinnedDropIndex] = useState<number | null>(null);
   const [editingTab, setEditingTab] = useState<OpenTab | null>(null);
   const [renamingTab, setRenamingTab] = useState<OpenTab | null>(null);
+  /**
+   * Empty pin strip is revealed one layout pass after drag start so DragOverlay
+   * can lock its initial rect before the in-flow zone shifts the list.
+   */
+  const [revealEmptyPinZone, setRevealEmptyPinZone] = useState(false);
   const onRefreshingChangeRef = useRef(onRefreshingChange);
   onRefreshingChangeRef.current = onRefreshingChange;
 
@@ -1645,6 +1759,27 @@ function TabsSectionInner({
     }
   }
 
+  async function handleDuplicateTab(tab: OpenTab) {
+    try {
+      await duplicateOpenTab(tab.id);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not duplicate tab');
+      await refreshTabs();
+    }
+  }
+
+  async function handleOpenInSplitView(tab: OpenTab, layout: SplitViewLayout) {
+    try {
+      await openTabInSplitView(tab, layout);
+      setError(null);
+      await refreshTabs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open Split View');
+      await refreshTabs();
+    }
+  }
+
   async function handleRenameTab(tab: OpenTab, title: string) {
     try {
       await renameOpenTabTitle(tab.id, title);
@@ -1698,6 +1833,7 @@ function TabsSectionInner({
       tabs.find((t) => t.id === event.active.id) ??
       null;
     setActiveDragTab(tab);
+    // Keep revealEmptyPinZone false this commit — see effect below.
 
     const activator = event.activatorEvent;
     if (activator && 'clientX' in activator && 'clientY' in activator) {
@@ -1709,6 +1845,25 @@ function TabsSectionInner({
       pointerOriginRef.current = null;
     }
   }
+
+  useEffect(() => {
+    const shouldReveal =
+      activeDragTab !== null &&
+      !activeDragTab.pinned &&
+      !tabsRef.current.some((t) => t.pinned);
+
+    if (!shouldReveal) {
+      setRevealEmptyPinZone(false);
+      return;
+    }
+
+    // Wait until after paint so DragOverlay has locked its initial rect on the
+    // unshifted list; then insert the in-flow "Drop to pin" zone.
+    const frame = requestAnimationFrame(() => {
+      setRevealEmptyPinZone(true);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeDragTab]);
 
   function updatePinnedDropIndicator(
     event: Pick<DragMoveEvent, 'active' | 'over' | 'delta'>,
@@ -1753,6 +1908,7 @@ function TabsSectionInner({
 
   function handleDragCancel() {
     setActiveDragTab(null);
+    setRevealEmptyPinZone(false);
     setOverPinned(false);
     setOverOpen(false);
     pinnedDropIndexRef.current = null;
@@ -1769,6 +1925,7 @@ function TabsSectionInner({
     const dropIndex = pinnedDropIndexRef.current;
 
     setActiveDragTab(null);
+    setRevealEmptyPinZone(false);
     setOverPinned(false);
     setOverOpen(false);
     pinnedDropIndexRef.current = null;
@@ -1904,8 +2061,10 @@ function TabsSectionInner({
     isDraggingUnpinned && overPinned && pinnedDropIndex !== null;
   const pinnedSlotCount = pinnedTabs.length + (showPinnedPlaceholder ? 1 : 0);
   const pinnedStretch = pinnedSlotCount <= 4;
-  // Hide when empty; show while dragging an open (unpinned) tab so drop-to-pin works.
-  const showPinnedSection = pinnedTabs.length > 0 || isDraggingUnpinned;
+  // Empty pin target is in-flow (pushes the list) but revealed after DragOverlay
+  // locks its rect — so the floating preview doesn't jump with the layout shift.
+  const showPinnedSection =
+    pinnedTabs.length > 0 || (isDraggingUnpinned && revealEmptyPinZone);
   const canClearTabs = tabs.some((t) => {
     if (t.pinned || t.active) return false;
     const activeTab = tabs.find((x) => x.active);
@@ -1954,6 +2113,9 @@ function TabsSectionInner({
           <DndContext
             sensors={sensors}
             collisionDetection={tabsCollisionDetection}
+            // In-flow empty pin zone shifts the list; don't scroll to "undo" that
+            // (it would hide the zone) — DragOverlay keeps its pre-shift rect instead.
+            autoScroll={{ layoutShiftCompensation: false }}
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
             onDragMove={handleDragMove}
@@ -1993,6 +2155,8 @@ function TabsSectionInner({
                             onActivate={handleActivate}
                             onUnpin={handleUnpinTab}
                             onMute={handleMuteTab}
+                            onDuplicate={handleDuplicateTab}
+                            onOpenInSplitView={handleOpenInSplitView}
                             onRename={openRenameTab}
                             onEdit={openEditTabUrl}
                           />
@@ -2070,6 +2234,8 @@ function TabsSectionInner({
                                   onClose={handleCloseTab}
                                   onPin={handlePinTab}
                                   onMute={handleMuteTab}
+                                  onDuplicate={handleDuplicateTab}
+                                  onOpenInSplitView={handleOpenInSplitView}
                                   onRename={handleRenameTab}
                                 />
                               ) : (
@@ -2083,6 +2249,8 @@ function TabsSectionInner({
                                   onClose={handleCloseTab}
                                   onPin={handlePinTab}
                                   onMute={handleMuteTab}
+                                  onDuplicate={handleDuplicateTab}
+                                  onOpenInSplitView={handleOpenInSplitView}
                                   onRename={handleRenameTab}
                                 />
                               ),
@@ -2174,7 +2342,7 @@ function TabsSectionInner({
           void handleCreateTab();
         }}
       />
-      <RecentlyClosedPopover enabled={enabled} active={active} />
+      <RecentlyClosedMenu enabled={enabled} active={active} />
     </div>
   );
 }

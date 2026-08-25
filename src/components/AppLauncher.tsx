@@ -41,7 +41,6 @@ export const REFRESHABLE_APPS = new Set<LauncherAppId>([
   'gmail',
   'calendar',
   'tasks',
-  'tabs',
   'keep',
 ]);
 

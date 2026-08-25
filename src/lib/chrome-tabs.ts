@@ -83,6 +83,80 @@ export async function createNewTab(): Promise<void> {
   await browser.tabs.create({});
 }
 
+/**
+ * Duplicate a tab into a new unpinned tab in the same window.
+ * Uses Chrome’s duplicate API, then unpins when the source was pinned so the
+ * copy lands in the regular open-tab strip.
+ */
+export async function duplicateOpenTab(tabId: number): Promise<void> {
+  const created = await browser.tabs.duplicate(tabId);
+  if (typeof created?.id === 'number' && created.pinned) {
+    await browser.tabs.update(created.id, { pinned: false });
+  }
+}
+
+/** Chrome Split View pane arrangement (matches `split_tabs::SplitTabLayout`). */
+export type SplitViewLayout = 'sideBySide' | 'stacked';
+
+/**
+ * `tabs.create` options Chrome accepts for opening a Split View.
+ * `splitWithTabId` is real but `nodoc` in Chromium’s tabs.json; `splitLayout`
+ * matches internal SplitTabLayout names when the build supports stacked splits.
+ */
+type CreateTabInSplitProperties = {
+  windowId?: number;
+  index?: number;
+  active?: boolean;
+  splitWithTabId: number;
+  splitLayout?: SplitViewLayout;
+};
+
+/**
+ * Open `tab` in a new Split View with the chosen layout — same path Chrome’s
+ * Bookmarks side panel uses (`tabs.create` + `splitWithTabId`).
+ *
+ * Creates a partner tab beside `tab` and puts both in a Split View. Defaults to
+ * side-by-side when the browser ignores/rejects `splitLayout`.
+ */
+export async function openTabInSplitView(
+  tab: Pick<OpenTab, 'id' | 'windowId' | 'splitViewId' | 'pinned'>,
+  layout: SplitViewLayout,
+): Promise<void> {
+  if (tab.splitViewId != null) {
+    throw new Error('This tab is already in a Split View');
+  }
+
+  // Split View is for regular tabs; unpin first so Chrome will accept the pair.
+  if (tab.pinned) {
+    await browser.tabs.update(tab.id, { pinned: false });
+  }
+
+  const existing = await browser.tabs.get(tab.id);
+  const index = typeof existing.index === 'number' ? existing.index + 1 : undefined;
+
+  const withLayout: CreateTabInSplitProperties = {
+    windowId: tab.windowId,
+    index,
+    active: true,
+    splitWithTabId: tab.id,
+    splitLayout: layout,
+  };
+
+  try {
+    await browser.tabs.create(withLayout as Parameters<typeof browser.tabs.create>[0]);
+    return;
+  } catch (err) {
+    // Older builds reject unknown `splitLayout`; retry with Chrome’s default (side-by-side).
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/unexpected property|splitLayout/i.test(message)) {
+      throw err instanceof Error ? err : new Error(message);
+    }
+  }
+
+  const { splitLayout: _ignored, ...withoutLayout } = withLayout;
+  await browser.tabs.create(withoutLayout as Parameters<typeof browser.tabs.create>[0]);
+}
+
 /** Reorder a tab within a window (Chrome tab strip index). */
 export async function moveOpenTab(
   tabId: number,
