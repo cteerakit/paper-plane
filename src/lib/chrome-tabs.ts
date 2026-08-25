@@ -78,6 +78,17 @@ export async function activateTab(tabId: number, windowId: number): Promise<void
   }
 }
 
+/**
+ * Toggle fullscreen on the last-focused normal browser window.
+ * Exits to `normal` when already fullscreen.
+ */
+export async function toggleFocusedWindowFullscreen(): Promise<void> {
+  const win = await browser.windows.getLastFocused({ windowTypes: ['normal'] });
+  if (typeof win.id !== 'number') return;
+  const nextState = win.state === 'fullscreen' ? 'normal' : 'fullscreen';
+  await browser.windows.update(win.id, { state: nextState });
+}
+
 /** Open a new blank tab in the current / last-focused window. */
 export async function createNewTab(): Promise<void> {
   await browser.tabs.create({});
@@ -95,33 +106,54 @@ export async function duplicateOpenTab(tabId: number): Promise<void> {
   }
 }
 
-/** Chrome Split View pane arrangement (matches `split_tabs::SplitTabLayout`). */
+/** Chrome Split View pane arrangement (UI labels; API currently defaults to side-by-side). */
 export type SplitViewLayout = 'sideBySide' | 'stacked';
 
 /**
- * `tabs.create` options Chrome accepts for opening a Split View.
- * `splitWithTabId` is real but `nodoc` in Chromium’s tabs.json; `splitLayout`
- * matches internal SplitTabLayout names when the build supports stacked splits.
+ * `tabs.create` options for opening a Split View.
+ *
+ * `splitWithTabId` landed in Chromium mid-Aug 2026 (`nodoc`, behind
+ * `ApiTabsSplitView` which is off by default). Stable Chrome still rejects it
+ * as an unexpected property. There is no `splitLayout` create property.
  */
 type CreateTabInSplitProperties = {
   windowId?: number;
   index?: number;
   active?: boolean;
   splitWithTabId: number;
-  splitLayout?: SplitViewLayout;
 };
 
+/** Shown when this Chrome build can’t create Split Views via the extensions API. */
+export const SPLIT_VIEW_CREATE_UNAVAILABLE =
+  'Chrome can’t create Split Views from extensions yet. Use Chrome’s tab menu, or try Canary with --enable-features=ApiTabsSplitView.';
+
+/** Shown when the create API exists but the feature flag ignored the request. */
+export const SPLIT_VIEW_CREATE_FLAG_DISABLED =
+  'Split View create API is present but disabled. Restart Chrome with --enable-features=ApiTabsSplitView.';
+
+/** Cached after a schema rejection so the UI can disable the menu. */
+let splitViewCreateUnsupported = false;
+
+/** Whether this session already saw Chrome reject `splitWithTabId`. */
+export function isSplitViewCreateUnsupported(): boolean {
+  return splitViewCreateUnsupported;
+}
+
 /**
- * Open `tab` in a new Split View with the chosen layout — same path Chrome’s
- * Bookmarks side panel uses (`tabs.create` + `splitWithTabId`).
+ * Open `tab` in a new Split View via `tabs.create({ splitWithTabId })`.
  *
- * Creates a partner tab beside `tab` and puts both in a Split View. Defaults to
- * side-by-side when the browser ignores/rejects `splitLayout`.
+ * Requires a Chromium build that includes `splitWithTabId` (Canary / very new)
+ * and `ApiTabsSplitView` enabled. Layout (side-by-side vs stacked) is not
+ * exposed yet — both menu options use Chrome’s default.
  */
 export async function openTabInSplitView(
   tab: Pick<OpenTab, 'id' | 'windowId' | 'splitViewId' | 'pinned'>,
-  layout: SplitViewLayout,
+  _layout: SplitViewLayout,
 ): Promise<void> {
+  if (splitViewCreateUnsupported) {
+    throw new Error(SPLIT_VIEW_CREATE_UNAVAILABLE);
+  }
+
   if (tab.splitViewId != null) {
     throw new Error('This tab is already in a Split View');
   }
@@ -131,30 +163,70 @@ export async function openTabInSplitView(
     await browser.tabs.update(tab.id, { pinned: false });
   }
 
+  // Always read live tab state — stale windowId/index from React state makes
+  // Chrome reject splitWithTabId (wrong window / non-adjacent index).
   const existing = await browser.tabs.get(tab.id);
-  const index = typeof existing.index === 'number' ? existing.index + 1 : undefined;
-
-  const withLayout: CreateTabInSplitProperties = {
-    windowId: tab.windowId,
-    index,
-    active: true,
-    splitWithTabId: tab.id,
-    splitLayout: layout,
-  };
-
-  try {
-    await browser.tabs.create(withLayout as Parameters<typeof browser.tabs.create>[0]);
-    return;
-  } catch (err) {
-    // Older builds reject unknown `splitLayout`; retry with Chrome’s default (side-by-side).
-    const message = err instanceof Error ? err.message : String(err);
-    if (!/unexpected property|splitLayout/i.test(message)) {
-      throw err instanceof Error ? err : new Error(message);
-    }
+  if (readSplitViewId(existing as { splitViewId?: number }) != null) {
+    throw new Error('This tab is already in a Split View');
   }
 
-  const { splitLayout: _ignored, ...withoutLayout } = withLayout;
-  await browser.tabs.create(withoutLayout as Parameters<typeof browser.tabs.create>[0]);
+  // Activate first so the partner lands next to the focused tab.
+  if (!existing.active) {
+    await browser.tabs.update(tab.id, { active: true });
+  }
+
+  // Re-read after activate/unpin — index can shift.
+  const live = await browser.tabs.get(tab.id);
+  if (typeof live.index !== 'number' || typeof live.windowId !== 'number') {
+    throw new Error('Could not resolve tab position for Split View');
+  }
+
+  // Chrome validates adjacency *before* OpenTabHelper runs. Omitting index
+  // defaults to -1, which fails "not adjacent" — always pass splitIndex + 1.
+  const createProperties: CreateTabInSplitProperties = {
+    windowId: live.windowId,
+    index: live.index + 1,
+    active: true,
+    splitWithTabId: tab.id,
+  };
+
+  let created: { id?: number } | undefined;
+  try {
+    created = (await browser.tabs.create(
+      createProperties as Parameters<typeof browser.tabs.create>[0],
+    )) as { id?: number } | undefined;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Schema rejection — Stable / older builds don’t know splitWithTabId yet.
+    if (/unexpected property/i.test(message)) {
+      splitViewCreateUnsupported = true;
+      throw new Error(SPLIT_VIEW_CREATE_UNAVAILABLE);
+    }
+    throw err instanceof Error ? err : new Error(message);
+  }
+
+  // When ApiTabsSplitView is off, Chrome may accept the property but ignore it
+  // and create a normal tab — detect that and clean up.
+  const partnerId = created?.id;
+  if (typeof partnerId !== 'number') {
+    throw new Error('Failed to create split view');
+  }
+
+  const [source, partner] = await Promise.all([
+    browser.tabs.get(tab.id),
+    browser.tabs.get(partnerId),
+  ]);
+  const sourceSplit = readSplitViewId(source as { splitViewId?: number });
+  const partnerSplit = readSplitViewId(partner as { splitViewId?: number });
+
+  if (sourceSplit == null || partnerSplit == null || sourceSplit !== partnerSplit) {
+    try {
+      await browser.tabs.remove(partnerId);
+    } catch {
+      // Partner may already be gone if Chrome rolled back a failed split.
+    }
+    throw new Error(SPLIT_VIEW_CREATE_FLAG_DISABLED);
+  }
 }
 
 /** Reorder a tab within a window (Chrome tab strip index). */

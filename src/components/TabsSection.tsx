@@ -39,6 +39,7 @@ import {
   AppWindow,
   Archive,
   ChevronDown,
+  Maximize,
   Plus,
   Volume2,
   VolumeX,
@@ -61,9 +62,6 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import {
@@ -93,13 +91,12 @@ import {
   moveOpenTab,
   moveOpenTabs,
   normalizeTabUrl,
-  openTabInSplitView,
   renameOpenTabTitle,
   setTabMuted,
   setTabPinned,
+  toggleFocusedWindowFullscreen,
   updateTabUrl,
   type OpenTab,
-  type SplitViewLayout,
 } from '@/lib/chrome-tabs';
 import { getGoogleFaviconUrl, resolveFaviconSrc } from '@/lib/favicon';
 import type { NewTabPosition } from '@/lib/settings';
@@ -339,49 +336,6 @@ async function copyTabUrl(url: string): Promise<void> {
   await navigator.clipboard.writeText(trimmed);
 }
 
-function OpenInSplitViewSubmenu({
-  disabled,
-  onSelect,
-}: {
-  disabled?: boolean;
-  onSelect: (layout: SplitViewLayout) => void;
-}) {
-  // Flat disabled item — a SubTrigger can still open on hover when "disabled".
-  if (disabled) {
-    return (
-      <ContextMenuItem className="cursor-pointer" disabled>
-        Open in Split View
-      </ContextMenuItem>
-    );
-  }
-
-  return (
-    <ContextMenuSub>
-      <ContextMenuSubTrigger className="cursor-pointer">
-        Open in Split View
-      </ContextMenuSubTrigger>
-      <ContextMenuSubContent className="min-w-0 w-max">
-        <ContextMenuItem
-          className="cursor-pointer"
-          onSelect={() => {
-            onSelect('sideBySide');
-          }}
-        >
-          Side-by-side
-        </ContextMenuItem>
-        <ContextMenuItem
-          className="cursor-pointer"
-          onSelect={() => {
-            onSelect('stacked');
-          }}
-        >
-          Stacked
-        </ContextMenuItem>
-      </ContextMenuSubContent>
-    </ContextMenuSub>
-  );
-}
-
 function AddMenu({
   disabled,
   onNewTab,
@@ -521,75 +475,118 @@ function RecentlyClosedMenu({
   if (!enabled) return null;
 
   return (
-    <div className="absolute bottom-3 left-3 z-20">
-      <DropdownMenu
-        open={open}
-        onOpenChange={(next) => {
-          setOpen(next);
-          setTooltipOpen(false);
-        }}
+    <DropdownMenu
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        setTooltipOpen(false);
+      }}
+    >
+      <Tooltip open={tooltipOpen && !open}>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Recently closed"
+              onPointerEnter={() => {
+                if (!open) setTooltipOpen(true);
+              }}
+              onPointerLeave={() => {
+                setTooltipOpen(false);
+              }}
+            >
+              <Archive className="size-4" aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Recently Closed</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent
+        side="top"
+        align="start"
+        sideOffset={8}
+        className="w-72 p-1"
       >
-        <Tooltip open={tooltipOpen && !open}>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label="Recently closed"
-                onPointerEnter={() => {
-                  if (!open) setTooltipOpen(true);
-                }}
-                onPointerLeave={() => {
-                  setTooltipOpen(false);
-                }}
-              >
-                <Archive className="size-4" aria-hidden />
-              </Button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent>Recently Closed</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent
-          side="top"
-          align="start"
-          sideOffset={8}
-          className="w-72 p-1"
+        {error && (
+          <p className="text-destructive px-2 py-3 text-sm" role="status">
+            {error}
+          </p>
+        )}
+        {!error && closedTabs.length === 0 && (
+          <p className="text-muted-foreground px-2 py-3 text-sm" role="status">
+            No recently closed tabs.
+          </p>
+        )}
+        {closedTabs.map((tab) => {
+          const closedAgo = formatRelativeTime(tab.lastModified);
+          return (
+            <DropdownMenuItem
+              key={tab.sessionId}
+              disabled={restoringId === tab.sessionId}
+              className="gap-2.5"
+              onSelect={() => {
+                void handleRestore(tab);
+              }}
+            >
+              <ClosedTabFavicon tab={tab} />
+              <span className="min-w-0 flex-1 truncate font-medium">{tab.title}</span>
+              {closedAgo && (
+                <span className="text-muted-foreground ml-auto shrink-0 text-xs">
+                  {closedAgo}
+                </span>
+              )}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function FullscreenButton({ enabled }: { enabled: boolean }) {
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  if (!enabled) return null;
+
+  async function handleClick() {
+    setBusy(true);
+    setTooltipOpen(false);
+    try {
+      await toggleFocusedWindowFullscreen();
+    } catch (err) {
+      console.error('Failed to toggle fullscreen', err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Tooltip open={tooltipOpen}>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Full screen"
+          disabled={busy}
+          onClick={() => {
+            void handleClick();
+          }}
+          onPointerEnter={() => {
+            setTooltipOpen(true);
+          }}
+          onPointerLeave={() => {
+            setTooltipOpen(false);
+          }}
         >
-          {error && (
-            <p className="text-destructive px-2 py-3 text-sm" role="status">
-              {error}
-            </p>
-          )}
-          {!error && closedTabs.length === 0 && (
-            <p className="text-muted-foreground px-2 py-3 text-sm" role="status">
-              No recently closed tabs.
-            </p>
-          )}
-          {closedTabs.map((tab) => {
-            const closedAgo = formatRelativeTime(tab.lastModified);
-            return (
-              <DropdownMenuItem
-                key={tab.sessionId}
-                disabled={restoringId === tab.sessionId}
-                className="gap-2.5"
-                onSelect={() => {
-                  void handleRestore(tab);
-                }}
-              >
-                <ClosedTabFavicon tab={tab} />
-                <span className="min-w-0 flex-1 truncate font-medium">{tab.title}</span>
-                {closedAgo && (
-                  <span className="text-muted-foreground ml-auto shrink-0 text-xs">
-                    {closedAgo}
-                  </span>
-                )}
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+          <Maximize className="size-4" aria-hidden />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Full screen</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -814,7 +811,6 @@ function TabPane({
   onPin,
   onMute,
   onDuplicate,
-  onOpenInSplitView,
   onRename,
   onRenamingChange,
 }: {
@@ -829,7 +825,6 @@ function TabPane({
   onPin: (tab: OpenTab) => void;
   onMute: (tab: OpenTab) => void;
   onDuplicate: (tab: OpenTab) => void;
-  onOpenInSplitView: (tab: OpenTab, layout: SplitViewLayout) => void;
   onRename: (tab: OpenTab, title: string) => void | Promise<void>;
   onRenamingChange?: (renaming: boolean) => void;
 }) {
@@ -1068,12 +1063,6 @@ function TabPane({
         >
           Duplicate
         </ContextMenuItem>
-        <OpenInSplitViewSubmenu
-          disabled={rowBusy || variant === 'pane' || tab.splitViewId != null}
-          onSelect={(layout) => {
-            void onOpenInSplitView(tab, layout);
-          }}
-        />
         <ContextMenuItem
           className="cursor-pointer"
           disabled={rowBusy}
@@ -1107,7 +1096,6 @@ function SortableTabRow({
   onPin,
   onMute,
   onDuplicate,
-  onOpenInSplitView,
   onRename,
 }: {
   tab: OpenTab;
@@ -1117,7 +1105,6 @@ function SortableTabRow({
   onPin: (tab: OpenTab) => void;
   onMute: (tab: OpenTab) => void;
   onDuplicate: (tab: OpenTab) => void;
-  onOpenInSplitView: (tab: OpenTab, layout: SplitViewLayout) => void;
   onRename: (tab: OpenTab, title: string) => void | Promise<void>;
 }) {
   const [isRenaming, setIsRenaming] = useState(false);
@@ -1148,7 +1135,6 @@ function SortableTabRow({
         onPin={onPin}
         onMute={onMute}
         onDuplicate={onDuplicate}
-        onOpenInSplitView={onOpenInSplitView}
         onRename={onRename}
         onRenamingChange={setIsRenaming}
       />
@@ -1164,7 +1150,6 @@ function SortableSplitTabRow({
   onPin,
   onMute,
   onDuplicate,
-  onOpenInSplitView,
   onRename,
 }: {
   tabs: OpenTab[];
@@ -1174,7 +1159,6 @@ function SortableSplitTabRow({
   onPin: (tab: OpenTab) => void;
   onMute: (tab: OpenTab) => void;
   onDuplicate: (tab: OpenTab) => void;
-  onOpenInSplitView: (tab: OpenTab, layout: SplitViewLayout) => void;
   onRename: (tab: OpenTab, title: string) => void | Promise<void>;
 }) {
   const primary = tabs[0]!;
@@ -1230,7 +1214,6 @@ function SortableSplitTabRow({
             onPin={onPin}
             onMute={onMute}
             onDuplicate={onDuplicate}
-            onOpenInSplitView={onOpenInSplitView}
             onRename={onRename}
             onRenamingChange={(next) => handlePaneRenamingChange(tab.id, next)}
           />
@@ -1248,7 +1231,6 @@ function SortablePinnedTab({
   onUnpin,
   onMute,
   onDuplicate,
-  onOpenInSplitView,
   onRename,
   onEdit,
 }: {
@@ -1260,7 +1242,6 @@ function SortablePinnedTab({
   onUnpin: (tab: OpenTab) => void;
   onMute: (tab: OpenTab) => void;
   onDuplicate: (tab: OpenTab) => void;
-  onOpenInSplitView: (tab: OpenTab, layout: SplitViewLayout) => void;
   onRename: (tab: OpenTab) => void;
   onEdit: (tab: OpenTab) => void;
 }) {
@@ -1377,12 +1358,6 @@ function SortablePinnedTab({
           >
             Duplicate
           </ContextMenuItem>
-          <OpenInSplitViewSubmenu
-            disabled={disabled || tab.splitViewId != null}
-            onSelect={(layout) => {
-              void onOpenInSplitView(tab, layout);
-            }}
-          />
           <ContextMenuItem
             className="cursor-pointer"
             disabled={disabled}
@@ -1769,17 +1744,6 @@ function TabsSectionInner({
     }
   }
 
-  async function handleOpenInSplitView(tab: OpenTab, layout: SplitViewLayout) {
-    try {
-      await openTabInSplitView(tab, layout);
-      setError(null);
-      await refreshTabs();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not open Split View');
-      await refreshTabs();
-    }
-  }
-
   async function handleRenameTab(tab: OpenTab, title: string) {
     try {
       await renameOpenTabTitle(tab.id, title);
@@ -2156,7 +2120,6 @@ function TabsSectionInner({
                             onUnpin={handleUnpinTab}
                             onMute={handleMuteTab}
                             onDuplicate={handleDuplicateTab}
-                            onOpenInSplitView={handleOpenInSplitView}
                             onRename={openRenameTab}
                             onEdit={openEditTabUrl}
                           />
@@ -2235,7 +2198,6 @@ function TabsSectionInner({
                                   onPin={handlePinTab}
                                   onMute={handleMuteTab}
                                   onDuplicate={handleDuplicateTab}
-                                  onOpenInSplitView={handleOpenInSplitView}
                                   onRename={handleRenameTab}
                                 />
                               ) : (
@@ -2250,7 +2212,6 @@ function TabsSectionInner({
                                   onPin={handlePinTab}
                                   onMute={handleMuteTab}
                                   onDuplicate={handleDuplicateTab}
-                                  onOpenInSplitView={handleOpenInSplitView}
                                   onRename={handleRenameTab}
                                 />
                               ),
@@ -2342,7 +2303,10 @@ function TabsSectionInner({
           void handleCreateTab();
         }}
       />
-      <RecentlyClosedMenu enabled={enabled} active={active} />
+      <div className="absolute bottom-3 left-3 z-20 flex items-center">
+        <RecentlyClosedMenu enabled={enabled} active={active} />
+        <FullscreenButton enabled={enabled} />
+      </div>
     </div>
   );
 }
