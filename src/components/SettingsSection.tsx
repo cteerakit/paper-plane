@@ -30,6 +30,11 @@ import {
   type NavPosition,
   type NewTabPosition,
 } from '@/lib/settings';
+import {
+  PRIVACY_POLICY_URL,
+  TERMS_OF_SERVICE_URL,
+  openLegalUrl,
+} from '@/lib/legal';
 import { cn } from '@/lib/utils';
 
 interface SettingsSectionProps {
@@ -513,6 +518,33 @@ export function SettingsSection({
         onSwitchAccount={onSwitchAccount}
         onSignOut={onSignOut}
       />
+
+      <Separator />
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium">Legal</h2>
+        <p className="text-muted-foreground text-xs">
+          How Paper Plane handles data and the terms for using the extension.
+        </p>
+        <div className="flex flex-col gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-foreground h-9 justify-start px-2 font-normal"
+            onClick={() => openLegalUrl(PRIVACY_POLICY_URL)}
+          >
+            Privacy Policy
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-foreground h-9 justify-start px-2 font-normal"
+            onClick={() => openLegalUrl(TERMS_OF_SERVICE_URL)}
+          >
+            Terms of Service
+          </Button>
+        </div>
+      </section>
     </div>
   );
 }
