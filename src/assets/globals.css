@@ -1,0 +1,159 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+
+@keyframes tooltip-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes tooltip-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+[data-slot='tooltip-content'][data-state='delayed-open'],
+[data-slot='tooltip-content'][data-state='instant-open'],
+[data-slot='tooltip-content'][data-state='open'] {
+  animation: tooltip-fade-in 150ms ease-out;
+}
+
+[data-slot='tooltip-content'][data-state='closed'] {
+  animation: tooltip-fade-out 120ms ease-in forwards;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  /*
+   * Interactive surface ladder (lightens upward toward white).
+   * On pure white --background these resolve to white (no darkening).
+   *   surface-1 ≈ #f7f7f7 when bg is lightly gray; white when bg is white
+   *   surface-2 ≈ #fbfbfb → white
+   *   surface-3 = white (#ffffff)
+   */
+  --surface-1: color-mix(in oklch, white 40%, var(--background));
+  --surface-2: color-mix(in oklch, white 65%, var(--background));
+  --surface-3: color-mix(in oklch, white 100%, var(--background));
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+}
+
+/*
+ * Chrome Refresh dark — toolbar / bookmark bar / side-panel chrome
+ * (SysBase Neutral25 #3c3c3c). Chrome does not expose live Appearance
+ * colors to extensions, so this is the default-dark match.
+ *   SysBase / toolbar / bookmark bar         = #3c3c3c
+ *   Neutral30 elevated cards                 = #474747
+ *   Neutral20 recessed                       = #303030
+ * Interactive surfaces lighten upward (higher luminance), derived from
+ * --background so Chrome theme overrides stay in step. On SysBase #3c3c3c:
+ *   surface-1 #424242 · surface-2 #474747 · surface-3 #525252
+ */
+.dark {
+  color-scheme: dark;
+  --background: #3c3c3c;
+  --foreground: #e3e3e3;
+  --card: #474747;
+  --card-foreground: #e3e3e3;
+  --popover: #3c3c3c;
+  --popover-foreground: #e3e3e3;
+  --primary: #e3e3e3;
+  --primary-foreground: #3c3c3c;
+  --secondary: #303030;
+  --secondary-foreground: #e3e3e3;
+  --muted: #303030;
+  --muted-foreground: #c7c7c7;
+  --accent: #474747;
+  --accent-foreground: #e3e3e3;
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: #c7c7c7;
+  --surface-1: color-mix(in oklch, white 3.1%, var(--background));
+  --surface-2: color-mix(in oklch, white 5.6%, var(--background));
+  --surface-3: color-mix(in oklch, white 11.3%, var(--background));
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+    min-height: 100%;
+  }
+
+  body {
+    min-height: 100vh;
+  }
+}
