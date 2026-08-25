@@ -31,6 +31,7 @@ import {
   type NewTabPosition,
 } from '@/lib/settings';
 import {
+  DISCORD_INVITE_URL,
   PRIVACY_POLICY_URL,
   TERMS_OF_SERVICE_URL,
   openLegalUrl,
@@ -518,6 +519,25 @@ export function SettingsSection({
         onSwitchAccount={onSwitchAccount}
         onSignOut={onSignOut}
       />
+
+      <Separator />
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium">Community</h2>
+        <p className="text-muted-foreground text-xs">
+          Feedback, questions, and updates from other Paper Plane users.
+        </p>
+        <div className="flex flex-col gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-foreground h-9 justify-start px-2 font-normal"
+            onClick={() => openLegalUrl(DISCORD_INVITE_URL)}
+          >
+            Join Discord
+          </Button>
+        </div>
+      </section>
 
       <Separator />
 
