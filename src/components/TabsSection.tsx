@@ -1,5 +1,6 @@
 import {
   Component,
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -19,6 +20,7 @@ import {
   useSensors,
   type CollisionDetection,
   type DragEndEvent,
+  type DragMoveEvent,
   type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
@@ -103,6 +105,7 @@ interface TabsSectionProps {
 }
 
 const PINNED_DROPPABLE_ID = 'pinned-drop-zone';
+const OPEN_DROPPABLE_ID = 'open-drop-zone';
 
 /** Flat open-tab row — no card chrome; hover / active lighten via surface ladder. */
 const openTabRowClass =
@@ -155,11 +158,17 @@ const tabsCollisionDetection: CollisionDetection = (args) => {
     if (overPinned) return [overPinned];
   }
 
-  // Pinned reorder / open-tab reorder: hit sibling sortables, not the pin zone.
+  // Pinned → open-zone wins so dropping on the open list unpins.
+  if (activeType === 'pinned-tab') {
+    const overOpen = pointerHits.find((c) => c.id === OPEN_DROPPABLE_ID);
+    if (overOpen) return [overOpen];
+  }
+
+  // Pinned reorder / open-tab reorder: hit sibling sortables, not the drop zones.
   return closestCenter({
     ...args,
     droppableContainers: args.droppableContainers.filter(
-      (c) => c.id !== PINNED_DROPPABLE_ID,
+      (c) => c.id !== PINNED_DROPPABLE_ID && c.id !== OPEN_DROPPABLE_ID,
     ),
   });
 };
@@ -954,6 +963,7 @@ function SortablePinnedTab({
   return (
     <li
       ref={setNodeRef}
+      data-pinned-tab
       style={{
         transform: CSS.Transform.toString(transform),
         transition: isDragging ? 'none' : transition,
@@ -1070,23 +1080,68 @@ function SortablePinnedTab({
   );
 }
 
-function PinnedDropZone({
+function PinnedDropZone({ children }: { children: ReactNode }) {
+  const { setNodeRef } = useDroppable({ id: PINNED_DROPPABLE_ID });
+
+  return (
+    <section ref={setNodeRef} className="min-h-10 w-full space-y-2" aria-label="Pinned">
+      {children}
+    </section>
+  );
+}
+
+/** Ghost slot in the pinned strip showing where a dragged tab will land. */
+function PinnedDropPlaceholder({ stretch }: { stretch: boolean }) {
+  return (
+    <li aria-hidden className={cn('pointer-events-none min-w-0', stretch && 'flex-1')}>
+      <div className="border-foreground/25 bg-accent/40 h-11 w-full rounded-lg border border-dashed" />
+    </li>
+  );
+}
+
+/**
+ * Insert index among pinned slots from the pointer (reading order).
+ * Uses live `[data-pinned-tab]` rects — placeholder is excluded so it can't
+ * steal hits; left-of-center on a pin means insert before that pin.
+ */
+function computePinnedInsertIndex(
+  clientX: number,
+  clientY: number,
+  listEl: HTMLElement | null,
+): number {
+  if (!listEl) return 0;
+  const slots = [...listEl.querySelectorAll<HTMLElement>('[data-pinned-tab]')];
+  if (slots.length === 0) return 0;
+
+  for (let i = 0; i < slots.length; i++) {
+    const rect = slots[i]!.getBoundingClientRect();
+    const midX = rect.left + rect.width / 2;
+
+    // Above this row → insert before this item (start of row).
+    if (clientY < rect.top) return i;
+    // On this row: left half → insert before, right half → keep scanning.
+    if (clientY <= rect.bottom && clientX < midX) return i;
+  }
+  return slots.length;
+}
+
+function OpenDropZone({
   highlight,
   children,
 }: {
   highlight: boolean;
   children: ReactNode;
 }) {
-  const { setNodeRef } = useDroppable({ id: PINNED_DROPPABLE_ID });
+  const { setNodeRef } = useDroppable({ id: OPEN_DROPPABLE_ID });
 
   return (
     <section
       ref={setNodeRef}
       className={cn(
-        'min-h-10 w-full space-y-2 rounded-lg transition-colors',
+        'flex min-h-10 w-full flex-col gap-0.5 rounded-lg transition-colors',
         highlight && 'bg-accent/40 ring-border ring-1 ring-inset',
       )}
-      aria-label="Pinned"
+      aria-label="Open tabs"
     >
       {children}
     </section>
@@ -1106,6 +1161,8 @@ function TabsSectionInner({
   const [creatingTab, setCreatingTab] = useState(false);
   const [activeDragTab, setActiveDragTab] = useState<OpenTab | null>(null);
   const [overPinned, setOverPinned] = useState(false);
+  const [overOpen, setOverOpen] = useState(false);
+  const [pinnedDropIndex, setPinnedDropIndex] = useState<number | null>(null);
   const [editingTab, setEditingTab] = useState<OpenTab | null>(null);
   const [renamingTab, setRenamingTab] = useState<OpenTab | null>(null);
 
@@ -1118,6 +1175,10 @@ function TabsSectionInner({
 
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
+  const pinnedListRef = useRef<HTMLUListElement | null>(null);
+  const pinnedDropIndexRef = useRef<number | null>(null);
+  /** Pointer client pos at drag start — overlay center is wrong for wide open-tab rows. */
+  const pointerOriginRef = useRef<{ x: number; y: number } | null>(null);
 
   const refreshTabs = useCallback(async () => {
     try {
@@ -1220,13 +1281,35 @@ function TabsSectionInner({
     }
   }
 
-  async function handlePinTab(tab: OpenTab) {
+  async function handlePinTab(tab: OpenTab, insertIndex?: number) {
     setPinningId(tab.id);
-    setTabs((prev) =>
-      prev.map((t) => (t.id === tab.id ? { ...t, pinned: true } : t)),
+    const currentPinned = tabs.filter((t) => t.pinned);
+    const at = Math.max(
+      0,
+      Math.min(insertIndex ?? currentPinned.length, currentPinned.length),
     );
+    const chromeIndex = currentPinned
+      .slice(0, at)
+      .filter((t) => t.windowId === tab.windowId).length;
+
+    setTabs((prev) => {
+      const without = prev.filter((t) => t.id !== tab.id);
+      const otherPinned = without.filter((t) => t.pinned);
+      const unpinned = without.filter((t) => !t.pinned);
+      const pinAt = Math.max(0, Math.min(at, otherPinned.length));
+      return [
+        ...otherPinned.slice(0, pinAt),
+        { ...tab, pinned: true },
+        ...otherPinned.slice(pinAt),
+        ...unpinned,
+      ];
+    });
+
     try {
       await setTabPinned(tab.id, true);
+      if (insertIndex !== undefined) {
+        await moveOpenTab(tab.id, chromeIndex, tab.windowId);
+      }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not pin tab');
@@ -1339,15 +1422,66 @@ function TabsSectionInner({
       tabs.find((t) => t.id === event.active.id) ??
       null;
     setActiveDragTab(tab);
+
+    const activator = event.activatorEvent;
+    if (activator && 'clientX' in activator && 'clientY' in activator) {
+      pointerOriginRef.current = {
+        x: (activator as PointerEvent).clientX,
+        y: (activator as PointerEvent).clientY,
+      };
+    } else {
+      pointerOriginRef.current = null;
+    }
+  }
+
+  function updatePinnedDropIndicator(
+    event: Pick<DragMoveEvent, 'active' | 'over' | 'delta'>,
+  ) {
+    const activeTab = event.active.data.current?.tab as OpenTab | undefined;
+    const draggingUnpinned = Boolean(activeTab && !activeTab.pinned);
+    const overId = event.over?.id;
+    const overPinnedZone =
+      overId === PINNED_DROPPABLE_ID ||
+      (typeof overId === 'number' &&
+        tabsRef.current.some((t) => t.id === overId && t.pinned));
+
+    setOverPinned(draggingUnpinned && overPinnedZone);
+    setOverOpen(event.over?.id === OPEN_DROPPABLE_ID);
+
+    if (!draggingUnpinned || !overPinnedZone) {
+      pinnedDropIndexRef.current = null;
+      setPinnedDropIndex(null);
+      return;
+    }
+
+    const origin = pointerOriginRef.current;
+    const clientX = origin ? origin.x + event.delta.x : null;
+    const clientY = origin ? origin.y + event.delta.y : null;
+    const pinnedCount = tabsRef.current.filter((t) => t.pinned).length;
+    const index =
+      clientX !== null && clientY !== null
+        ? computePinnedInsertIndex(clientX, clientY, pinnedListRef.current)
+        : pinnedCount;
+
+    pinnedDropIndexRef.current = index;
+    setPinnedDropIndex(index);
   }
 
   function handleDragOver(event: DragOverEvent) {
-    setOverPinned(event.over?.id === PINNED_DROPPABLE_ID);
+    updatePinnedDropIndicator(event);
+  }
+
+  function handleDragMove(event: DragMoveEvent) {
+    updatePinnedDropIndicator(event);
   }
 
   function handleDragCancel() {
     setActiveDragTab(null);
     setOverPinned(false);
+    setOverOpen(false);
+    pinnedDropIndexRef.current = null;
+    setPinnedDropIndex(null);
+    pointerOriginRef.current = null;
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -1356,14 +1490,29 @@ function TabsSectionInner({
       (active.data.current?.tab as OpenTab | undefined) ??
       tabs.find((t) => t.id === active.id) ??
       null;
+    const dropIndex = pinnedDropIndexRef.current;
 
     setActiveDragTab(null);
     setOverPinned(false);
+    setOverOpen(false);
+    pinnedDropIndexRef.current = null;
+    setPinnedDropIndex(null);
+    pointerOriginRef.current = null;
 
     if (!over || !draggedTab) return;
 
     if (over.id === PINNED_DROPPABLE_ID) {
-      if (!draggedTab.pinned) void handlePinTab(draggedTab);
+      if (!draggedTab.pinned) {
+        void handlePinTab(
+          draggedTab,
+          dropIndex ?? tabs.filter((t) => t.pinned).length,
+        );
+      }
+      return;
+    }
+
+    if (over.id === OPEN_DROPPABLE_ID) {
+      if (draggedTab.pinned) void handleUnpinTab(draggedTab);
       return;
     }
 
@@ -1406,7 +1555,13 @@ function TabsSectionInner({
       return;
     }
 
-    if (draggedTab.pinned || overTab.pinned) return;
+    // Pinned → open row (fallback if open zone didn't win collision): unpin.
+    if (draggedTab.pinned && !overTab.pinned) {
+      void handleUnpinTab(draggedTab);
+      return;
+    }
+
+    if (overTab.pinned) return;
 
     const windowTabs = tabs.filter((t) => t.windowId === draggedTab.windowId);
     const pinnedCount = windowTabs.filter((t) => t.pinned).length;
@@ -1446,7 +1601,12 @@ function TabsSectionInner({
   const tabGroups = useMemo(() => groupTabsByWindow(openTabs), [openTabs]);
   const showWindowHeadings = tabGroups.length > 1;
   const isDraggingUnpinned = Boolean(activeDragTab) && !activeDragTab?.pinned;
-  const pinnedDropHighlight = overPinned && isDraggingUnpinned;
+  const isDraggingPinned = Boolean(activeDragTab?.pinned);
+  const openDropHighlight = overOpen && isDraggingPinned;
+  const showPinnedPlaceholder =
+    isDraggingUnpinned && overPinned && pinnedDropIndex !== null;
+  const pinnedSlotCount = pinnedTabs.length + (showPinnedPlaceholder ? 1 : 0);
+  const pinnedStretch = pinnedSlotCount <= 4;
   // Hide when empty; show while dragging an open (unpinned) tab so drop-to-pin works.
   const showPinnedSection = pinnedTabs.length > 0 || isDraggingUnpinned;
   const canClearTabs =
@@ -1482,13 +1642,14 @@ function TabsSectionInner({
             collisionDetection={tabsCollisionDetection}
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
+            onDragMove={handleDragMove}
             onDragEnd={handleDragEnd}
             onDragCancel={handleDragCancel}
           >
             <div className="flex flex-col gap-1.5">
             {showPinnedSection && (
-              <PinnedDropZone highlight={pinnedDropHighlight}>
-                {pinnedTabs.length > 0 && (
+              <PinnedDropZone>
+                {(pinnedTabs.length > 0 || showPinnedPlaceholder) && (
                   // ≤4: equal-width flex fill. >4: fixed 4-col grid (no stretch on incomplete last row).
                   // Height matches open-tab rows (h-11).
                   // max-height ≈ 3 rows (h-11 + gap-2), scroll when more than 12.
@@ -1497,25 +1658,34 @@ function TabsSectionInner({
                     strategy={rectSortingStrategy}
                   >
                     <ul
+                      ref={pinnedListRef}
                       className={
-                        pinnedTabs.length <= 4
+                        pinnedStretch
                           ? 'flex max-h-[9.25rem] w-full gap-2 overflow-y-auto'
                           : 'grid max-h-[9.25rem] w-full grid-cols-4 gap-2 overflow-y-auto'
                       }
                     >
-                      {pinnedTabs.map((tab) => (
-                        <SortablePinnedTab
-                          key={tab.id}
-                          tab={tab}
-                          stretch={pinnedTabs.length <= 4}
-                          disabled={closingId === tab.id || pinningId === tab.id}
-                          onActivate={handleActivate}
-                          onUnpin={handleUnpinTab}
-                          onMute={handleMuteTab}
-                          onRename={openRenameTab}
-                          onEdit={openEditTabUrl}
-                        />
+                      {pinnedTabs.map((tab, index) => (
+                        <Fragment key={tab.id}>
+                          {showPinnedPlaceholder && pinnedDropIndex === index && (
+                            <PinnedDropPlaceholder stretch={pinnedStretch} />
+                          )}
+                          <SortablePinnedTab
+                            tab={tab}
+                            stretch={pinnedStretch}
+                            disabled={closingId === tab.id || pinningId === tab.id}
+                            onActivate={handleActivate}
+                            onUnpin={handleUnpinTab}
+                            onMute={handleMuteTab}
+                            onRename={openRenameTab}
+                            onEdit={openEditTabUrl}
+                          />
+                        </Fragment>
                       ))}
+                      {showPinnedPlaceholder &&
+                        pinnedDropIndex === pinnedTabs.length && (
+                          <PinnedDropPlaceholder stretch={pinnedStretch} />
+                        )}
                     </ul>
                   </SortableContext>
                 )}
@@ -1547,7 +1717,7 @@ function TabsSectionInner({
                 </Button>
               </div>
 
-              <section className="flex flex-col gap-0.5">
+              <OpenDropZone highlight={openDropHighlight}>
                 {newTabPosition === 'top' && newTabControl}
                 {error && (
                   <Alert variant="destructive">
@@ -1589,7 +1759,7 @@ function TabsSectionInner({
                   </div>
                 )}
                 {newTabPosition === 'bottom' && newTabControl}
-              </section>
+              </OpenDropZone>
             </div>
             </div>
 
