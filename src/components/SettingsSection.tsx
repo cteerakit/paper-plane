@@ -31,9 +31,16 @@ import {
   type NewTabPosition,
 } from '@/lib/settings';
 import {
+  APP_AUTHOR,
+  APP_ICON_PATH,
+  APP_NAME,
+  CHROME_WEB_STORE_URL,
   DISCORD_INVITE_URL,
+  GITHUB_URL,
+  HOMEPAGE_URL,
   PRIVACY_POLICY_URL,
   TERMS_OF_SERVICE_URL,
+  getAppVersion,
   openLegalUrl,
 } from '@/lib/legal';
 import { cn } from '@/lib/utils';
@@ -523,18 +530,57 @@ export function SettingsSection({
       <Separator />
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">Community</h2>
-        <p className="text-muted-foreground text-xs">
-          Feedback, questions, and updates from other Paper Plane users.
-        </p>
+        <h2 className="text-sm font-medium">About</h2>
+        <div className={cn(cardSurfaceClass, 'flex flex-col gap-3')}>
+          <div className="flex items-center gap-3">
+            <img
+              src={APP_ICON_PATH}
+              alt=""
+              width={48}
+              height={48}
+              className="size-12 shrink-0 rounded-xl"
+            />
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{APP_NAME}</p>
+              <p className="text-muted-foreground text-xs">by {APP_AUTHOR}</p>
+              <p className="text-muted-foreground mt-0.5 text-xs">
+                Version {getAppVersion()}
+              </p>
+            </div>
+          </div>
+        </div>
         <div className="flex flex-col gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-foreground h-9 justify-start px-2 font-normal"
+            onClick={() => openLegalUrl(HOMEPAGE_URL)}
+          >
+            Homepage
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-foreground h-9 justify-start px-2 font-normal"
+            onClick={() => openLegalUrl(CHROME_WEB_STORE_URL)}
+          >
+            Chrome Web Store
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-foreground h-9 justify-start px-2 font-normal"
+            onClick={() => openLegalUrl(GITHUB_URL)}
+          >
+            GitHub
+          </Button>
           <Button
             type="button"
             variant="ghost"
             className="text-foreground h-9 justify-start px-2 font-normal"
             onClick={() => openLegalUrl(DISCORD_INVITE_URL)}
           >
-            Join Discord
+            Discord
           </Button>
         </div>
       </section>
