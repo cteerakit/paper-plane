@@ -34,13 +34,31 @@ export interface TaskItem {
   listId: string;
 }
 
-export interface DriveFile {
-  id: string;
-  name: string;
-  mimeType: string;
-  modifiedTime: string;
-  webViewLink?: string;
-  iconLink?: string;
+export interface GoogleFetchInit extends RequestInit {
+  /** OAuth retry on 401 — defaults to !silent */
+  interactiveOnRetry?: boolean;
+  /** Background list loads — non-interactive OAuth retry */
+  silent?: boolean;
+}
+
+const MAX_TRANSIENT_RETRIES = 2;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(response: Response): number | null {
+  const header = response.headers.get('Retry-After');
+  if (!header) return null;
+  const seconds = Number(header);
+  if (!Number.isNaN(seconds)) return seconds * 1000;
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
+  return null;
+}
+
+function isTransientStatus(status: number): boolean {
+  return status === 429 || status >= 500;
 }
 
 async function getAuthToken(interactive = false): Promise<string> {
@@ -71,33 +89,52 @@ async function revokeToken(token: string): Promise<void> {
   }
 }
 
-export async function googleFetch(
-  url: string,
-  options: RequestInit = {},
-  interactiveOnRetry = true,
-): Promise<Response> {
-  let token = await getAuthToken(false);
-  const headers = {
-    ...options.headers,
-    Authorization: `Bearer ${token}`,
-  };
-  // Always hit the network — manual nav refresh must not reuse HTTP cache.
-  const init: RequestInit = { ...options, cache: 'no-store', headers };
-  let response = await fetch(url, init);
+export async function googleFetch(url: string, options: GoogleFetchInit = {}): Promise<Response> {
+  const { interactiveOnRetry, silent = false, ...requestInit } = options;
+  const interactive = interactiveOnRetry ?? !silent;
 
-  if (response.status === 401) {
-    await removeCachedToken(token);
-    token = await getAuthToken(interactiveOnRetry);
-    response = await fetch(url, {
-      ...init,
-      headers: {
-        ...options.headers,
+  for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+    try {
+      let token = await getAuthToken(false);
+      const headers = {
+        ...requestInit.headers,
         Authorization: `Bearer ${token}`,
-      },
-    });
+      };
+      // Always hit the network — manual nav refresh must not reuse HTTP cache.
+      const init: RequestInit = { ...requestInit, cache: 'no-store', headers };
+      let response = await fetch(url, init);
+
+      if (response.status === 401) {
+        await removeCachedToken(token);
+        token = await getAuthToken(interactive);
+        response = await fetch(url, {
+          ...init,
+          headers: {
+            ...requestInit.headers,
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      }
+
+      if (isTransientStatus(response.status) && attempt < MAX_TRANSIENT_RETRIES) {
+        const retryAfter =
+          response.status === 429 ? parseRetryAfterMs(response) : null;
+        const delay = retryAfter ?? Math.min(1000 * 2 ** attempt, 8000);
+        await sleep(delay);
+        continue;
+      }
+
+      return response;
+    } catch (err) {
+      if (attempt < MAX_TRANSIENT_RETRIES) {
+        await sleep(Math.min(1000 * 2 ** attempt, 8000));
+        continue;
+      }
+      throw err;
+    }
   }
 
-  return response;
+  throw new Error('Google API request failed after retries');
 }
 
 export async function signIn(): Promise<void> {
@@ -190,6 +227,7 @@ function gmailSearchDate(d: Date): string {
 async function fetchGmailThreads(params: URLSearchParams): Promise<GmailThread[]> {
   const listRes = await googleFetch(
     `${GMAIL_API}/gmail/v1/users/me/messages?${params}`,
+    { silent: true },
   );
   if (!listRes.ok) {
     throw new Error(`Gmail list failed: ${listRes.status}`);
@@ -201,6 +239,7 @@ async function fetchGmailThreads(params: URLSearchParams): Promise<GmailThread[]
   for (const msg of messages) {
     const detailRes = await googleFetch(
       `${GMAIL_API}/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
+      { silent: true },
     );
     if (!detailRes.ok) continue;
     const detail = await detailRes.json();
@@ -271,6 +310,7 @@ async function fetchCalendarEvents(timeMin: Date, timeMax: Date, maxResults = 50
 
   const response = await googleFetch(
     `${GOOGLE_API}/calendar/v3/calendars/primary/events?${params}`,
+    { silent: true },
   );
   if (!response.ok) {
     throw new Error(`Calendar failed: ${response.status}`);
@@ -294,7 +334,7 @@ export async function fetchTodayEvents(): Promise<CalendarEvent[]> {
 }
 
 export async function fetchTaskLists(): Promise<Array<{ id: string; title: string }>> {
-  const response = await googleFetch(`${GOOGLE_API}/tasks/v1/users/@me/lists`);
+  const response = await googleFetch(`${GOOGLE_API}/tasks/v1/users/@me/lists`, { silent: true });
   if (!response.ok) {
     throw new Error(`Task lists failed: ${response.status}`);
   }
@@ -334,6 +374,7 @@ async function fetchIncompleteTasksForList(
 ): Promise<TaskItem[]> {
   const response = await googleFetch(
     `${GOOGLE_API}/tasks/v1/lists/${listId}/tasks?showCompleted=false&maxResults=${maxResults}`,
+    { silent: true },
   );
   if (!response.ok) {
     throw new Error(`Tasks failed: ${response.status}`);
@@ -417,36 +458,4 @@ export async function completeTask(listId: string, taskId: string): Promise<void
   if (!response.ok) {
     throw new Error(`Task update failed: ${response.status}`);
   }
-}
-
-export async function fetchRecentFiles(max = 10): Promise<DriveFile[]> {
-  const params = new URLSearchParams({
-    pageSize: String(max),
-    orderBy: 'modifiedTime desc',
-    q: 'trashed = false',
-    fields: 'files(id,name,mimeType,modifiedTime,webViewLink,iconLink)',
-  });
-
-  const response = await googleFetch(`${GOOGLE_API}/drive/v3/files?${params}`);
-  if (!response.ok) {
-    throw new Error(`Drive failed: ${response.status}`);
-  }
-  const data = await response.json();
-  return (data.files ?? []).map((file: Record<string, unknown>) => ({
-    id: file.id as string,
-    name: file.name as string,
-    mimeType: file.mimeType as string,
-    modifiedTime: file.modifiedTime as string,
-    webViewLink: file.webViewLink as string | undefined,
-    iconLink: file.iconLink as string | undefined,
-  }));
-}
-
-export function formatMimeLabel(mimeType: string): string {
-  if (mimeType.includes('document')) return 'Doc';
-  if (mimeType.includes('spreadsheet')) return 'Sheet';
-  if (mimeType.includes('presentation')) return 'Slides';
-  if (mimeType.includes('folder')) return 'Folder';
-  if (mimeType.includes('pdf')) return 'PDF';
-  return 'File';
 }

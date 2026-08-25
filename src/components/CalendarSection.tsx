@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { cardSurfaceClass } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCachedFetch } from '@/hooks/useCachedFetch';
-import { calendarCacheItem } from '@/lib/cache';
+import { calendarCacheItem, GOOGLE_CACHE_STALE_MS } from '@/lib/cache';
 import { fetchUpcomingEvents } from '@/lib/google/api';
 
 interface CalendarSectionProps {
@@ -40,6 +40,7 @@ export function CalendarSection({
     'Failed to load calendar',
     refreshToken,
     onRefreshingChange,
+    GOOGLE_CACHE_STALE_MS,
   );
 
   if (!enabled) return null;

@@ -4,7 +4,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { listRowButtonClass } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCachedFetch } from '@/hooks/useCachedFetch';
-import { gmailCacheItem } from '@/lib/cache';
+import { gmailCacheItem, GOOGLE_CACHE_STALE_MS } from '@/lib/cache';
 import { fetchInboxThreads, getGmailThreadUrl } from '@/lib/google/api';
 import { cn } from '@/lib/utils';
 
@@ -28,6 +28,7 @@ export function GmailSection({
     'Failed to load email',
     refreshToken,
     onRefreshingChange,
+    GOOGLE_CACHE_STALE_MS,
   );
 
   if (!enabled) return null;

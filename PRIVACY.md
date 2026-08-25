@@ -17,7 +17,6 @@ Depending on which features you use, Paper Plane may access:
 - **Gmail** — read-only access to message metadata and content needed to list unread mail and Today’s overview (`gmail.readonly`).
 - **Google Calendar** — read-only access to event details for upcoming events (`calendar.events.readonly`).
 - **Google Tasks** — access to create, read, update, and complete tasks (`tasks`).
-- **Google Drive metadata** — read-only file metadata if that scope is used (`drive.metadata.readonly`).
 - **Chrome tabs & sessions** — open tabs, recently closed tabs, and related metadata for the Tabs feature.
 - **Bookmarks & favicons** — as needed to display and manage tab-related UI.
 - **Notes (Google Keep)** — an embedded Keep experience that uses your existing Chrome Google session; it does not use the separate OAuth “Connect Google” flow.

@@ -34,7 +34,7 @@ pnpm install
 Those panels use Google APIs. Create an OAuth client and put the client ID in `.env`.
 
 1. **Create a project** in [Google Cloud Console](https://console.cloud.google.com/)
-2. **Enable APIs** — [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com), [Google Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com), and [Google Tasks API](https://console.cloud.google.com/apis/library/tasks.googleapis.com). Drive is also listed in the manifest for possible future use.
+2. **Enable APIs** — [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com), [Google Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com), and [Google Tasks API](https://console.cloud.google.com/apis/library/tasks.googleapis.com).
 3. **OAuth consent screen** — User type **External**, publish status **Testing**, add your Google account as a **test user**. `gmail.readonly` is a **restricted** scope; while the app is in Testing, only listed test users can grant it.
 4. **Create OAuth client** — Application type **Chrome extension**, extension ID:
 
@@ -106,6 +106,5 @@ src/
 - `calendar.events.readonly` — Calendar agenda and Today events
 - `gmail.readonly` — Email list and Today mail (**restricted**; Testing + test users required)
 - `tasks` — Task list and Today tasks
-- `drive.metadata.readonly` — declared for possible future use
 
 Keep uses your existing Google session in Chrome, not these API scopes. Tabs uses Chrome extension APIs only.

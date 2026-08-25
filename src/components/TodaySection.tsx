@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertCircle } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -7,7 +7,12 @@ import { cardSurfaceClass } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCachedFetch } from '@/hooks/useCachedFetch';
-import { setCacheEntry, todayCacheItem } from '@/lib/cache';
+import {
+  GOOGLE_CACHE_STALE_MS,
+  removeTaskFromCaches,
+  subscribeTaskCompleted,
+  todayCacheItem,
+} from '@/lib/cache';
 import {
   completeTask,
   fetchTodaySnapshot,
@@ -79,22 +84,29 @@ export function TodaySection({
     'Failed to load Today',
     refreshToken,
     onRefreshingChange,
+    GOOGLE_CACHE_STALE_MS,
   );
   const [completingKey, setCompletingKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    return subscribeTaskCompleted((listId, taskId) => {
+      setData((prev) => ({
+        ...prev,
+        tasks: prev.tasks.filter((t) => t.listId !== listId || t.id !== taskId),
+      }));
+    });
+  }, [setData]);
 
   async function handleComplete(task: TaskItem) {
     const key = `${task.listId}:${task.id}`;
     setCompletingKey(key);
     try {
       await completeTask(task.listId, task.id);
-      setData((prev) => {
-        const next: TodaySnapshot = {
-          ...prev,
-          tasks: prev.tasks.filter((t) => !(t.id === task.id && t.listId === task.listId)),
-        };
-        void setCacheEntry(todayCacheItem, next);
-        return next;
-      });
+      await removeTaskFromCaches(task.listId, task.id);
+      setData((prev) => ({
+        ...prev,
+        tasks: prev.tasks.filter((t) => !(t.id === task.id && t.listId === task.listId)),
+      }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete task');
     } finally {

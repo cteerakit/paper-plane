@@ -13,6 +13,7 @@ type CacheItem<T> = {
  * `refetch` / `refreshToken` force-fetch from the network while keeping current data on screen —
  * never clears data and never toggles `loading` when rows are already shown.
  * `refreshing` is true only during manual refetch (for the nav spin affordance).
+ * When `staleAfterMs` is set, refetches on visibility if cache or last fetch is older than TTL.
  */
 export function useCachedFetch<T>(
   enabled: boolean,
@@ -22,6 +23,7 @@ export function useCachedFetch<T>(
   fallbackError: string,
   refreshToken = 0,
   onRefreshingChange?: (refreshing: boolean) => void,
+  staleAfterMs?: number,
 ) {
   const [data, setData] = useState<T>(empty);
   const [loading, setLoading] = useState(false);
@@ -29,14 +31,17 @@ export function useCachedFetch<T>(
   const [error, setError] = useState<string | null>(null);
   const hasDataRef = useRef(false);
   const generationRef = useRef(0);
+  const lastSuccessfulFetchAtRef = useRef(0);
   const fetcherRef = useRef(fetcher);
   const itemRef = useRef(item);
   const fallbackErrorRef = useRef(fallbackError);
   const onRefreshingChangeRef = useRef(onRefreshingChange);
+  const staleAfterMsRef = useRef(staleAfterMs);
   fetcherRef.current = fetcher;
   itemRef.current = item;
   fallbackErrorRef.current = fallbackError;
   onRefreshingChangeRef.current = onRefreshingChange;
+  staleAfterMsRef.current = staleAfterMs;
 
   useEffect(() => {
     onRefreshingChangeRef.current?.(refreshing);
@@ -77,6 +82,7 @@ export function useCachedFetch<T>(
       setData(fresh);
       hasDataRef.current = true;
       setError(null);
+      lastSuccessfulFetchAtRef.current = Date.now();
       await setCacheEntry(itemRef.current, fresh);
     } catch (err) {
       if (generation !== generationRef.current) return;
@@ -107,6 +113,35 @@ export function useCachedFetch<T>(
     if (!enabled || refreshToken <= 0) return;
     void runFetch('refetch');
   }, [enabled, refreshToken, runFetch]);
+
+  useEffect(() => {
+    if (!enabled || staleAfterMs == null) return;
+
+    const isStale = async (): Promise<boolean> => {
+      const ttl = staleAfterMsRef.current;
+      if (ttl == null) return false;
+
+      if (lastSuccessfulFetchAtRef.current === 0) return true;
+
+      const sinceFetch = Date.now() - lastSuccessfulFetchAtRef.current;
+      if (sinceFetch >= ttl) return true;
+
+      const cached = await itemRef.current.getValue();
+      if (cached && Date.now() - cached.updatedAt >= ttl) return true;
+
+      return false;
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      void isStale().then((stale) => {
+        if (stale) void runFetch('refetch');
+      });
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [enabled, staleAfterMs, runFetch]);
 
   return { data, setData, loading, refreshing, error, setError, refetch };
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, ChevronRight } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -6,7 +6,12 @@ import { cardSurfaceClass } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCachedFetch } from '@/hooks/useCachedFetch';
-import { setCacheEntry, tasksCacheItem } from '@/lib/cache';
+import {
+  GOOGLE_CACHE_STALE_MS,
+  removeTaskFromCaches,
+  subscribeTaskCompleted,
+  tasksCacheItem,
+} from '@/lib/cache';
 import { completeTask, fetchIncompleteTasks, type TaskItem } from '@/lib/google/api';
 import { cn } from '@/lib/utils';
 
@@ -119,7 +124,16 @@ export function TasksSection({
     'Failed to load tasks',
     refreshToken,
     onRefreshingChange,
+    GOOGLE_CACHE_STALE_MS,
   );
+
+  useEffect(() => {
+    return subscribeTaskCompleted((listId, taskId) => {
+      setTasks((prev) =>
+        prev.filter((t) => t.listId !== listId || t.id !== taskId),
+      );
+    });
+  }, [setTasks]);
   const [completingKey, setCompletingKey] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<CollapsedMap>(loadCollapsedSections);
   const groups = useMemo(() => groupTasks(tasks), [tasks]);
@@ -137,11 +151,10 @@ export function TasksSection({
     setCompletingKey(key);
     try {
       await completeTask(task.listId, task.id);
-      setTasks((prev) => {
-        const next = prev.filter((t) => !(t.id === task.id && t.listId === task.listId));
-        void setCacheEntry(tasksCacheItem, next);
-        return next;
-      });
+      await removeTaskFromCaches(task.listId, task.id);
+      setTasks((prev) =>
+        prev.filter((t) => !(t.id === task.id && t.listId === task.listId)),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete task');
     } finally {
