@@ -248,42 +248,6 @@ export function TodaySection({
           </CollapsibleSection>
 
           <CollapsibleSection
-            id="tasks"
-            title="Task"
-            expanded={!collapsed.tasks}
-            onToggle={toggleSection}
-          >
-            {tasks.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No tasks due today.</p>
-            ) : (
-              <ul className="space-y-2">
-                {tasks.map((task) => (
-                  <li
-                    key={`${task.listId}:${task.id}`}
-                    className={cn(cardSurfaceClass, 'flex items-start gap-3')}
-                  >
-                    <Checkbox
-                      checked={false}
-                      disabled={completingKey === `${task.listId}:${task.id}`}
-                      onCheckedChange={() => handleComplete(task)}
-                      aria-label={`Complete ${task.title}`}
-                      className="mt-0.5"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="leading-snug font-medium">{task.title}</p>
-                      {task.due && (
-                        <p className="text-muted-foreground mt-1 text-xs">
-                          {formatDue(task.due)}
-                        </p>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CollapsibleSection>
-
-          <CollapsibleSection
             id="email"
             title="Unread emails"
             expanded={!collapsed.email}
@@ -319,6 +283,42 @@ export function TodaySection({
                         {thread.snippet}
                       </p>
                     </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            id="tasks"
+            title="Task"
+            expanded={!collapsed.tasks}
+            onToggle={toggleSection}
+          >
+            {tasks.length === 0 ? (
+              <p className="text-muted-foreground text-sm">No tasks due today.</p>
+            ) : (
+              <ul className="space-y-2">
+                {tasks.map((task) => (
+                  <li
+                    key={`${task.listId}:${task.id}`}
+                    className={cn(cardSurfaceClass, 'flex items-start gap-3')}
+                  >
+                    <Checkbox
+                      checked={false}
+                      disabled={completingKey === `${task.listId}:${task.id}`}
+                      onCheckedChange={() => handleComplete(task)}
+                      aria-label={`Complete ${task.title}`}
+                      className="mt-0.5"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="leading-snug font-medium">{task.title}</p>
+                      {task.due && (
+                        <p className="text-muted-foreground mt-1 text-xs">
+                          {formatDue(task.due)}
+                        </p>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>
