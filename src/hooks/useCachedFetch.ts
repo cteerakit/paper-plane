@@ -12,6 +12,7 @@ type CacheItem<T> = {
  * Skeleton only when there is no cache yet.
  * `refetch` / `refreshToken` force-fetch from the network while keeping current data on screen —
  * never clears data and never toggles `loading` when rows are already shown.
+ * `refreshing` is true only during manual refetch (for the nav spin affordance).
  */
 export function useCachedFetch<T>(
   enabled: boolean,
@@ -20,18 +21,30 @@ export function useCachedFetch<T>(
   empty: T,
   fallbackError: string,
   refreshToken = 0,
+  onRefreshingChange?: (refreshing: boolean) => void,
 ) {
   const [data, setData] = useState<T>(empty);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasDataRef = useRef(false);
   const generationRef = useRef(0);
   const fetcherRef = useRef(fetcher);
   const itemRef = useRef(item);
   const fallbackErrorRef = useRef(fallbackError);
+  const onRefreshingChangeRef = useRef(onRefreshingChange);
   fetcherRef.current = fetcher;
   itemRef.current = item;
   fallbackErrorRef.current = fallbackError;
+  onRefreshingChangeRef.current = onRefreshingChange;
+
+  useEffect(() => {
+    onRefreshingChangeRef.current?.(refreshing);
+  }, [refreshing]);
+
+  useEffect(() => {
+    return () => onRefreshingChangeRef.current?.(false);
+  }, []);
 
   const runFetch = useCallback(async (mode: 'load' | 'refetch') => {
     if (!enabled) return;
@@ -54,6 +67,7 @@ export function useCachedFetch<T>(
       setError(null);
     } else {
       // Manual refresh (nav re-click): keep current rows; never skeleton if anything is painted.
+      setRefreshing(true);
       setError(null);
     }
 
@@ -71,7 +85,10 @@ export function useCachedFetch<T>(
         setError(err instanceof Error ? err.message : fallbackErrorRef.current);
       }
     } finally {
-      if (generation === generationRef.current) setLoading(false);
+      if (generation === generationRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [enabled]);
 
@@ -91,5 +108,5 @@ export function useCachedFetch<T>(
     void runFetch('refetch');
   }, [enabled, refreshToken, runFetch]);
 
-  return { data, setData, loading, error, setError, refetch };
+  return { data, setData, loading, refreshing, error, setError, refetch };
 }

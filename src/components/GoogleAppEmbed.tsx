@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { GOOGLE_EMBED_APPS, type EmbedAppId } from '@/lib/google/apps';
 import {
@@ -8,30 +8,39 @@ import {
 
 interface GoogleAppEmbedProps {
   appId: EmbedAppId;
+  /** Reports prepare/remount work for the nav refresh spinner. */
+  onRefreshingChange?: (refreshing: boolean) => void;
 }
 
 function needsCookieRelaxation(appId: EmbedAppId): boolean {
   return (EMBED_APPS_NEEDING_COOKIE_RELAXATION as readonly string[]).includes(appId);
 }
 
-export function GoogleAppEmbed({ appId }: GoogleAppEmbedProps) {
+export function GoogleAppEmbed({ appId, onRefreshingChange }: GoogleAppEmbedProps) {
   const app = GOOGLE_EMBED_APPS[appId];
   const [src, setSrc] = useState<string | null>(null);
+  const onRefreshingChangeRef = useRef(onRefreshingChange);
+  onRefreshingChangeRef.current = onRefreshingChange;
 
   useEffect(() => {
     let cancelled = false;
     setSrc(null);
+    onRefreshingChangeRef.current?.(true);
 
     const prepare = needsCookieRelaxation(appId)
       ? relaxGoogleCookiesForIframe()
       : Promise.resolve();
 
     prepare.finally(() => {
-      if (!cancelled) setSrc(app.url);
+      if (!cancelled) {
+        setSrc(app.url);
+        onRefreshingChangeRef.current?.(false);
+      }
     });
 
     return () => {
       cancelled = true;
+      onRefreshingChangeRef.current?.(false);
     };
   }, [app.url, appId]);
 

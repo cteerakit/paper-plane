@@ -14,6 +14,7 @@ interface TasksSectionProps {
   enabled: boolean;
   /** Increment to force a network refetch while the panel stays mounted. */
   refreshToken?: number;
+  onRefreshingChange?: (refreshing: boolean) => void;
 }
 
 type TaskGroupId = 'overdue' | 'today' | 'future' | 'nodate';
@@ -105,7 +106,11 @@ function groupTasks(tasks: TaskItem[]): TaskGroup[] {
   return groups.filter((g) => g.tasks.length > 0);
 }
 
-export function TasksSection({ enabled, refreshToken = 0 }: TasksSectionProps) {
+export function TasksSection({
+  enabled,
+  refreshToken = 0,
+  onRefreshingChange,
+}: TasksSectionProps) {
   const { data: tasks, setData: setTasks, loading, error, setError } = useCachedFetch(
     enabled,
     tasksCacheItem,
@@ -113,6 +118,7 @@ export function TasksSection({ enabled, refreshToken = 0 }: TasksSectionProps) {
     [],
     'Failed to load tasks',
     refreshToken,
+    onRefreshingChange,
   );
   const [completingKey, setCompletingKey] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<CollapsedMap>(loadCollapsedSections);

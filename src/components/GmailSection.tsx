@@ -12,9 +12,14 @@ interface GmailSectionProps {
   enabled: boolean;
   /** Increment to force a network refetch while the panel stays mounted. */
   refreshToken?: number;
+  onRefreshingChange?: (refreshing: boolean) => void;
 }
 
-export function GmailSection({ enabled, refreshToken = 0 }: GmailSectionProps) {
+export function GmailSection({
+  enabled,
+  refreshToken = 0,
+  onRefreshingChange,
+}: GmailSectionProps) {
   const { data: threads, loading, error } = useCachedFetch(
     enabled,
     gmailCacheItem,
@@ -22,6 +27,7 @@ export function GmailSection({ enabled, refreshToken = 0 }: GmailSectionProps) {
     [],
     'Failed to load email',
     refreshToken,
+    onRefreshingChange,
   );
 
   if (!enabled) return null;

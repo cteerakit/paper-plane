@@ -102,6 +102,9 @@ interface TabsSectionProps {
   active: boolean;
   /** Where the New tab control sits relative to the open-tab list. */
   newTabPosition?: NewTabPosition;
+  /** Bump from AppLauncher when Tabs is already active (manual refresh). */
+  refreshToken?: number;
+  onRefreshingChange?: (refreshing: boolean) => void;
 }
 
 const PINNED_DROPPABLE_ID = 'pinned-drop-zone';
@@ -1152,6 +1155,8 @@ function TabsSectionInner({
   enabled,
   active,
   newTabPosition = 'bottom',
+  refreshToken = 0,
+  onRefreshingChange,
 }: TabsSectionProps) {
   const [tabs, setTabs] = useState<OpenTab[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1165,6 +1170,8 @@ function TabsSectionInner({
   const [pinnedDropIndex, setPinnedDropIndex] = useState<number | null>(null);
   const [editingTab, setEditingTab] = useState<OpenTab | null>(null);
   const [renamingTab, setRenamingTab] = useState<OpenTab | null>(null);
+  const onRefreshingChangeRef = useRef(onRefreshingChange);
+  onRefreshingChangeRef.current = onRefreshingChange;
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -1248,6 +1255,20 @@ function TabsSectionInner({
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [enabled, active, refreshTabs]);
+
+  // Manual refresh from active nav re-click — keep the list mounted (no skeleton).
+  useEffect(() => {
+    if (!enabled || !active || refreshToken <= 0) return;
+    let cancelled = false;
+    onRefreshingChangeRef.current?.(true);
+    void refreshTabs().finally(() => {
+      if (!cancelled) onRefreshingChangeRef.current?.(false);
+    });
+    return () => {
+      cancelled = true;
+      onRefreshingChangeRef.current?.(false);
+    };
+  }, [enabled, active, refreshToken, refreshTabs]);
 
   async function handleActivate(tab: OpenTab) {
     // Optimistic active highlight — avoid waiting on Chrome events (and never dim the row).

@@ -21,6 +21,7 @@ interface TodaySectionProps {
   enabled: boolean;
   /** Increment to force a network refetch while the panel stays mounted. */
   refreshToken?: number;
+  onRefreshingChange?: (refreshing: boolean) => void;
 }
 
 const EMPTY_SNAPSHOT: TodaySnapshot = { events: [], tasks: [], threads: [] };
@@ -59,7 +60,11 @@ function SectionHeading({ children }: { children: string }) {
   );
 }
 
-export function TodaySection({ enabled, refreshToken = 0 }: TodaySectionProps) {
+export function TodaySection({
+  enabled,
+  refreshToken = 0,
+  onRefreshingChange,
+}: TodaySectionProps) {
   const {
     data,
     setData,
@@ -73,6 +78,7 @@ export function TodaySection({ enabled, refreshToken = 0 }: TodaySectionProps) {
     EMPTY_SNAPSHOT,
     'Failed to load Today',
     refreshToken,
+    onRefreshingChange,
   );
   const [completingKey, setCompletingKey] = useState<string | null>(null);
 

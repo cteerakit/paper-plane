@@ -12,6 +12,7 @@ interface CalendarSectionProps {
   enabled: boolean;
   /** Increment to force a network refetch while the panel stays mounted. */
   refreshToken?: number;
+  onRefreshingChange?: (refreshing: boolean) => void;
 }
 
 function formatEventWhen(start: string): string {
@@ -26,7 +27,11 @@ function formatEventWhen(start: string): string {
   return `${day} · ${time}`;
 }
 
-export function CalendarSection({ enabled, refreshToken = 0 }: CalendarSectionProps) {
+export function CalendarSection({
+  enabled,
+  refreshToken = 0,
+  onRefreshingChange,
+}: CalendarSectionProps) {
   const { data: events, loading, error } = useCachedFetch(
     enabled,
     calendarCacheItem,
@@ -34,6 +39,7 @@ export function CalendarSection({ enabled, refreshToken = 0 }: CalendarSectionPr
     [],
     'Failed to load calendar',
     refreshToken,
+    onRefreshingChange,
   );
 
   if (!enabled) return null;

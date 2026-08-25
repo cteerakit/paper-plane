@@ -17,7 +17,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Settings } from 'lucide-react';
+import { RefreshCw, Settings } from 'lucide-react';
 
 import { GoogleAppIcon, type GoogleAppIconId } from '@/components/GoogleAppIcon';
 import { Button } from '@/components/ui/button';
@@ -35,11 +35,23 @@ import { cn } from '@/lib/utils';
 
 export type AppView = LauncherAppId | 'settings';
 
+/** Apps that re-fetch or remount when the active nav icon is clicked again. */
+export const REFRESHABLE_APPS = new Set<LauncherAppId>([
+  'today',
+  'gmail',
+  'calendar',
+  'tasks',
+  'tabs',
+  'keep',
+]);
+
 interface AppLauncherProps {
   activeView: AppView;
   onViewChange: (view: AppView) => void;
   /** Called when the already-active launcher app is clicked again (manual refresh). */
   onRefreshActive?: (id: LauncherAppId) => void;
+  /** When set, the matching active nav icon shows a spinning refresh affordance. */
+  refreshingApp?: LauncherAppId | null;
   enabledApps: EnabledApps;
   /** Full saved order; settings gear is never included. */
   appOrder: LauncherAppId[];
@@ -63,6 +75,10 @@ interface AppIconButtonProps {
   id: LauncherAppId;
   label: string;
   active: boolean;
+  /** When active, hover/focus swaps the app icon for a refresh affordance. */
+  refreshable?: boolean;
+  /** Manual refresh in flight — keep the refresh icon visible and spinning. */
+  refreshing?: boolean;
   className?: string;
   onSelect?: () => void;
 }
@@ -71,17 +87,28 @@ function AppIconButton({
   id,
   label,
   active,
+  refreshable = false,
+  refreshing = false,
   className,
   onSelect,
   onClick,
   ...rest
 }: AppIconButtonProps & ComponentProps<typeof Button>) {
+  const showRefreshAffordance = active && refreshable;
+
   return (
     <Button
       variant={active ? 'secondary' : 'ghost'}
       size="icon"
-      aria-label={label}
-      className={cn('cursor-pointer touch-none', className)}
+      aria-label={
+        refreshing
+          ? `Refreshing ${label}`
+          : showRefreshAffordance
+            ? `Refresh ${label}`
+            : label
+      }
+      aria-busy={refreshing || undefined}
+      className={cn('group cursor-pointer touch-none', className)}
       {...rest}
       // Must come after {...rest}: TooltipTrigger asChild injects onClick into rest,
       // which would otherwise replace onSelect and block app switching / refresh.
@@ -92,7 +119,27 @@ function AppIconButton({
         onClick?.(event);
       }}
     >
-      <GoogleAppIcon id={id as GoogleAppIconId} />
+      {refreshing ? (
+        <RefreshCw
+          className="size-5 animate-spin"
+          aria-hidden="true"
+          strokeWidth={1.75}
+        />
+      ) : showRefreshAffordance ? (
+        <>
+          <GoogleAppIcon
+            id={id as GoogleAppIconId}
+            className="size-5 group-hover:hidden group-focus-visible:hidden"
+          />
+          <RefreshCw
+            className="hidden size-5 group-hover:block group-focus-visible:block"
+            aria-hidden="true"
+            strokeWidth={1.75}
+          />
+        </>
+      ) : (
+        <GoogleAppIcon id={id as GoogleAppIconId} />
+      )}
     </Button>
   );
 }
@@ -101,10 +148,19 @@ interface SortableAppButtonProps {
   id: LauncherAppId;
   label: string;
   active: boolean;
+  refreshable: boolean;
+  refreshing: boolean;
   onSelect: () => void;
 }
 
-function SortableAppButton({ id, label, active, onSelect }: SortableAppButtonProps) {
+function SortableAppButton({
+  id,
+  label,
+  active,
+  refreshable,
+  refreshing,
+  onSelect,
+}: SortableAppButtonProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
   });
@@ -117,6 +173,8 @@ function SortableAppButton({ id, label, active, onSelect }: SortableAppButtonPro
           id={id}
           label={label}
           active={active}
+          refreshable={refreshable}
+          refreshing={refreshing}
           onSelect={onSelect}
           aria-grabbed={isDragging}
           style={{
@@ -129,7 +187,9 @@ function SortableAppButton({ id, label, active, onSelect }: SortableAppButtonPro
           {...listeners}
         />
       </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent>
+        {refreshing ? 'Refreshing…' : active && refreshable ? 'Refresh' : label}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -138,6 +198,7 @@ export function AppLauncher({
   activeView,
   onViewChange,
   onRefreshActive,
+  refreshingApp = null,
   enabledApps,
   appOrder,
   onAppOrderChange,
@@ -203,15 +264,18 @@ export function AppLauncher({
           {visibleIds.map((id) => {
             const app = appMeta[id];
             if (!app) return null;
+            const refreshable = REFRESHABLE_APPS.has(id);
             return (
               <SortableAppButton
                 key={id}
                 id={id}
                 label={app.label}
                 active={activeView === id}
+                refreshable={refreshable}
+                refreshing={refreshingApp === id}
                 onSelect={() => {
                   if (activeView === id) {
-                    onRefreshActive?.(id);
+                    if (refreshable) onRefreshActive?.(id);
                   } else {
                     onViewChange(id);
                   }

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import { AppLauncher, type AppView } from '@/components/AppLauncher';
+import { AppLauncher, REFRESHABLE_APPS, type AppView } from '@/components/AppLauncher';
 import { CalendarSection } from '@/components/CalendarSection';
 import { GmailSection } from '@/components/GmailSection';
 import { GoogleAppEmbed } from '@/components/GoogleAppEmbed';
@@ -32,9 +32,10 @@ import {
 } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 
-const REFRESHABLE_APPS = new Set<LauncherAppId>(['today', 'gmail', 'calendar', 'tasks']);
-
-type RefreshTokens = Record<'today' | 'gmail' | 'calendar' | 'tasks', number>;
+type RefreshTokens = Record<
+  'today' | 'gmail' | 'calendar' | 'tasks' | 'tabs' | 'keep',
+  number
+>;
 
 function panelClass(isActive: boolean) {
   return cn(
@@ -73,8 +74,28 @@ export default function App() {
     gmail: 0,
     calendar: 0,
     tasks: 0,
+    tabs: 0,
+    keep: 0,
   });
+  const [refreshingApp, setRefreshingApp] = useState<LauncherAppId | null>(null);
   const prefsInitialized = useRef(false);
+
+  const refreshingHandlers = useMemo(() => {
+    const make = (id: LauncherAppId) => (refreshing: boolean) => {
+      setRefreshingApp((prev) => {
+        if (refreshing) return id;
+        return prev === id ? null : prev;
+      });
+    };
+    return {
+      today: make('today'),
+      gmail: make('gmail'),
+      calendar: make('calendar'),
+      tasks: make('tasks'),
+      tabs: make('tabs'),
+      keep: make('keep'),
+    };
+  }, []);
 
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [user, setUser] = useState<GoogleUser | null>(null);
@@ -84,12 +105,14 @@ export default function App() {
   const [accountError, setAccountError] = useState<string | null>(null);
 
   function handleViewChange(next: AppView) {
+    setRefreshingApp(null);
     setView(next);
   }
 
   function handleRefreshActive(id: LauncherAppId) {
     if (!REFRESHABLE_APPS.has(id)) return;
     const key = id as keyof RefreshTokens;
+    setRefreshingApp(id);
     setRefreshTokens((prev) => ({ ...prev, [key]: prev[key] + 1 }));
   }
 
@@ -307,6 +330,7 @@ export default function App() {
         activeView={view}
         onViewChange={handleViewChange}
         onRefreshActive={handleRefreshActive}
+        refreshingApp={refreshingApp}
         enabledApps={enabledApps}
         appOrder={appOrder}
         onAppOrderChange={(order) => {
@@ -326,7 +350,12 @@ export default function App() {
           aria-hidden={view !== 'today'}
         >
           {renderAuthGate(
-            <TodaySection key={authKey} enabled refreshToken={refreshTokens.today} />,
+            <TodaySection
+              key={authKey}
+              enabled
+              refreshToken={refreshTokens.today}
+              onRefreshingChange={refreshingHandlers.today}
+            />,
           )}
         </div>
       )}
@@ -337,7 +366,12 @@ export default function App() {
           aria-hidden={view !== 'gmail'}
         >
           {renderAuthGate(
-            <GmailSection key={authKey} enabled refreshToken={refreshTokens.gmail} />,
+            <GmailSection
+              key={authKey}
+              enabled
+              refreshToken={refreshTokens.gmail}
+              onRefreshingChange={refreshingHandlers.gmail}
+            />,
           )}
         </div>
       )}
@@ -348,7 +382,12 @@ export default function App() {
           aria-hidden={view !== 'calendar'}
         >
           {renderAuthGate(
-            <CalendarSection key={authKey} enabled refreshToken={refreshTokens.calendar} />,
+            <CalendarSection
+              key={authKey}
+              enabled
+              refreshToken={refreshTokens.calendar}
+              onRefreshingChange={refreshingHandlers.calendar}
+            />,
           )}
         </div>
       )}
@@ -359,7 +398,12 @@ export default function App() {
           aria-hidden={view !== 'tasks'}
         >
           {renderAuthGate(
-            <TasksSection key={authKey} enabled refreshToken={refreshTokens.tasks} />,
+            <TasksSection
+              key={authKey}
+              enabled
+              refreshToken={refreshTokens.tasks}
+              onRefreshingChange={refreshingHandlers.tasks}
+            />,
           )}
         </div>
       )}
@@ -369,7 +413,13 @@ export default function App() {
           className={cn(panelClass(view === 'keep'), 'flex flex-col')}
           aria-hidden={view !== 'keep'}
         >
-          <GoogleAppEmbed appId="keep" />
+          <GoogleAppEmbed
+            key={refreshTokens.keep}
+            appId="keep"
+            onRefreshingChange={
+              refreshTokens.keep > 0 ? refreshingHandlers.keep : undefined
+            }
+          />
         </div>
       )}
 
@@ -382,6 +432,8 @@ export default function App() {
             enabled
             active={view === 'tabs'}
             newTabPosition={newTabPosition}
+            refreshToken={refreshTokens.tabs}
+            onRefreshingChange={refreshingHandlers.tabs}
           />
         </div>
       )}
