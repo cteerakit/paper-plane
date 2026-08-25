@@ -1,8 +1,9 @@
 {
   "name": "flyout",
-  "description": "Google Workspace apps in Chrome’s side panel — Email, Calendar, and Note",
+  "description": "Chrome side panel for tabs, email, calendar, tasks, notes, and your day at a glance",
   "private": true,
   "version": "0.0.1",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",

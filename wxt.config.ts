@@ -62,7 +62,7 @@ export default defineConfig({
   manifest: () => ({
     name: 'Paper Plane',
     description:
-      'Google Workspace apps in Chrome’s side panel — Email, Calendar, and Note.',
+      'Chrome side panel for tabs, email, calendar, tasks, notes, and your day at a glance.',
     key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAo2m/N4aCgjfdij0ivmOMditXFwn+HjUHLkyliGj4HJleQkWGfoVRGTQTN+wZQTLFZuVO/77OkGB6EuJKvfAL77Aoba8vCjfYD17UF5AGlTYbRHxXd2tXQCV6H5NZ7SCVw3W+tRLsfadXIWhD1EfhQKKN43+BX6XYWkrxRfGIVNI3XOc+BfSyLgY/88ml+HUmEamjI6v6emA0KMFkRETAMIJBp2LxFhYvc9FZF8s3740Qu6gL8gKgdxtkNPVkUQbNZOJswS5+1XIQSPrw6qibTtpWuDrx2Wu4PfGycGjkxyHWEC8/NXWWA3xovLQKl/NL+aa2P19zm+QVqE5lfPD2yQIDAQAB',
     permissions: [
       'sidePanel',

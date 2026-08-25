@@ -1,17 +1,25 @@
 # Paper Plane
 
-Google Workspace apps in Chrome’s native side panel — Keep embed, plus Gmail and Calendar via Google APIs.
+Chrome side panel for your open tabs, email, calendar, tasks, notes, and a Today overview of your day.
 
 Built with [WXT](https://wxt.dev), React, Tailwind CSS v4, and shadcn/ui.
 
+## License
+
+[PolyForm Noncommercial License 1.0.0](LICENSE) — free for noncommercial use. Commercial use requires a separate license from the author.
+
 ## Features
 
-- **Side panel** opens from the toolbar icon (not a popup)
-- **Keep**: full web app embedded in the panel (iframe + header stripping)
-- **Gmail**: native unread-mail UI via Gmail API — not an iframe of mail.google.com
-- **Calendar**: native agenda UI via Google Calendar API (today’s events + Meet join links)
-- **Google OAuth** via `chrome.identity.getAuthToken` for Gmail + Calendar API access
-- **shadcn/ui** components for the panel chrome
+- **Side panel** — opens from the toolbar icon (not a popup)
+- **Tabs** — open tabs by window: activate, reorder, pin/unpin, mute, rename, edit URL, close, restore recently closed, new tab
+- **Today** — one view of today’s events, due tasks, and recent mail
+- **Email** — native unread list (API-backed, not a full mailbox iframe)
+- **Calendar** — upcoming events, with video-call join links when present
+- **Task** — incomplete tasks grouped by overdue / today / later
+- **Note** — notes app embedded in the panel
+- **Launcher** — enable/disable apps, drag to reorder, choose default app and nav position (top / bottom / left / right)
+- **Theme** — light, dark, or follow the browser
+- **Sign-in** — connect an account for email, calendar, and tasks (Google today; more providers later)
 
 ## Setup
 
@@ -21,12 +29,12 @@ Built with [WXT](https://wxt.dev), React, Tailwind CSS v4, and shadcn/ui.
 pnpm install
 ```
 
-### 2. Google Cloud project (required for Gmail + Calendar)
+### 2. Google Cloud project (required for Email, Calendar, Tasks, Today)
 
-Gmail and Calendar use Google APIs. Create an OAuth client and put the client ID in `.env`.
+Those panels use Google APIs. Create an OAuth client and put the client ID in `.env`.
 
 1. **Create a project** in [Google Cloud Console](https://console.cloud.google.com/)
-2. **Enable APIs** — [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com) and [Google Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com). Other APIs in the manifest scopes (Tasks, Drive) can stay enabled for future hub widgets.
+2. **Enable APIs** — [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com), [Google Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com), and [Google Tasks API](https://console.cloud.google.com/apis/library/tasks.googleapis.com). Drive is also listed in the manifest for possible future use.
 3. **OAuth consent screen** — User type **External**, publish status **Testing**, add your Google account as a **test user**. `gmail.readonly` is a **restricted** scope; while the app is in Testing, only listed test users can grant it.
 4. **Create OAuth client** — Application type **Chrome extension**, extension ID:
 
@@ -42,9 +50,9 @@ cp .env.example .env
 # Edit WXT_GOOGLE_CLIENT_ID=your-id.apps.googleusercontent.com
 ```
 
-6. **Scopes** are already declared in `wxt.config.ts` for Calendar (`calendar.events.readonly`) and Gmail (`gmail.readonly`), plus Tasks/Drive for possible future API widgets.
+6. **Scopes** are declared in `wxt.config.ts` (see [OAuth scopes](#oauth-scopes) below).
 
-**Keep** uses your existing Chrome Google session and does not need this OAuth client. **Gmail** and **Calendar** do (shared `chrome.identity.getAuthToken` sign-in).
+**Tabs** works without Google sign-in. **Note (Keep)** uses your existing Chrome Google session. **Email**, **Calendar**, **Task**, and **Today** need the OAuth client above.
 
 ### 3. Develop (your logged-in Chrome)
 
@@ -58,12 +66,12 @@ Then in **that** Chrome window:
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
-3. **Load unpacked** → select `D:\Projects\flyout\.output\chrome-mv3-dev`
+3. **Load unpacked** → select `.output/chrome-mv3-dev` under this repo
 4. Pin Paper Plane and click the icon to open the side panel
 
 `pnpm dev` watches files and rebuilds; click **Reload** on the extension card after changes.
 
-Click **Gmail** or **Calendar** in the launcher — you should see the API UI (unread list / today’s agenda), not an iframe. If auth fails with a bad client ID, use a **Chrome extension** OAuth client type (not Web), matching the extension ID above. Re-check APIs enabled, test user, and `.env` client ID.
+If Google API auth fails with a bad client ID, use a **Chrome extension** OAuth client type (not Web), matching the extension ID above. Re-check APIs enabled, test user, and `.env` client ID.
 
 To use WXT’s separate dev browser instead, set `webExt.disabled` to `false` in `wxt.config.ts`.
 
@@ -80,18 +88,24 @@ Output: `.output/chrome-mv3`
 ```
 src/
   entrypoints/
-    background.ts         # side panel on action click, Keep embed DNR rules
+    background.ts          # side panel on action click, Keep embed DNR rules
     google-apps.content.ts # compact Keep UI when framed
-    sidepanel/            # React launcher + Gmail/Calendar API views + Keep embed
-  components/             # GmailSection, CalendarSection, embeds, shadcn primitives
-  lib/google/api.ts       # OAuth + Gmail/Calendar (and other Google API clients)
-  lib/google/apps.ts      # Keep embed URL only
+    sidepanel/             # React launcher + panels
+  components/              # Tabs, Today, Gmail, Calendar, Tasks, Keep embed, Settings, UI
+  lib/
+    chrome-tabs.ts         # open tabs / pin / mute / rename
+    chrome-sessions.ts     # recently closed
+    chrome-theme.ts        # light / dark / system
+    settings.ts            # launcher prefs
+    google/api.ts          # OAuth + Gmail / Calendar / Tasks clients
+    google/apps.ts         # Keep embed URL
 ```
 
 ## OAuth scopes
 
-- `calendar.events.readonly` — used by the Calendar agenda view
-- `gmail.readonly` — used by the Gmail unread list (**restricted**; Testing + test users required)
-- `tasks`, `drive.metadata.readonly` — declared for possible future API widgets
+- `calendar.events.readonly` — Calendar agenda and Today events
+- `gmail.readonly` — Email list and Today mail (**restricted**; Testing + test users required)
+- `tasks` — Task list and Today tasks
+- `drive.metadata.readonly` — declared for possible future use
 
-Keep uses your existing Google session in Chrome, not these API scopes.
+Keep uses your existing Google session in Chrome, not these API scopes. Tabs uses Chrome extension APIs only.
