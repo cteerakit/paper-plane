@@ -1,6 +1,6 @@
 # Paper Plane
 
-Chrome side panel for your open tabs, email, calendar, tasks, notes, and a Today overview of your day.
+Chrome side panel for your open tabs, email, calendar, tasks, notes, and an overview of your day.
 
 Built with [WXT](https://wxt.dev), React, Tailwind CSS v4, and shadcn/ui.
 
