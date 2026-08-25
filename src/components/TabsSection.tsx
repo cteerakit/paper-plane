@@ -1083,13 +1083,41 @@ function SortablePinnedTab({
   );
 }
 
-function PinnedDropZone({ children }: { children: ReactNode }) {
+function PinnedDropZone({
+  highlight,
+  children,
+}: {
+  highlight?: boolean;
+  children: ReactNode;
+}) {
   const { setNodeRef } = useDroppable({ id: PINNED_DROPPABLE_ID });
 
   return (
-    <section ref={setNodeRef} className="min-h-10 w-full space-y-2" aria-label="Pinned">
+    <section
+      ref={setNodeRef}
+      className={cn(
+        'min-h-10 w-full space-y-2 rounded-lg transition-colors',
+        highlight && 'bg-accent/40 ring-border ring-1 ring-inset',
+      )}
+      aria-label="Pinned"
+    >
       {children}
     </section>
+  );
+}
+
+/** Empty pinned strip while dragging — labeled so the drop target is obvious. */
+function PinnedEmptyDropHint({ active }: { active: boolean }) {
+  return (
+    <div
+      className={cn(
+        'border-foreground/25 text-muted-foreground flex h-11 w-full items-center justify-center rounded-lg border border-dashed text-xs transition-colors',
+        active && 'border-foreground/40 bg-accent/40 text-foreground/70',
+      )}
+      aria-hidden
+    >
+      Drop to pin
+    </div>
   );
 }
 
@@ -1669,8 +1697,10 @@ function TabsSectionInner({
           >
             <div className="flex flex-col gap-1.5">
             {showPinnedSection && (
-              <PinnedDropZone>
-                {(pinnedTabs.length > 0 || showPinnedPlaceholder) && (
+              <PinnedDropZone highlight={isDraggingUnpinned && overPinned}>
+                {pinnedTabs.length === 0 ? (
+                  <PinnedEmptyDropHint active={overPinned} />
+                ) : (
                   // ≤4: equal-width flex fill. >4: fixed 4-col grid (no stretch on incomplete last row).
                   // Height matches open-tab rows (h-11).
                   // max-height ≈ 3 rows (h-11 + gap-2), scroll when more than 12.
