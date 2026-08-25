@@ -9,6 +9,20 @@ export interface OpenTab {
   muted: boolean;
   /** True while the tab is producing sound (Chrome `tab.audible`). */
   audible: boolean;
+  /**
+   * Chrome 140+ Split View id. `undefined` when the tab is not in a split
+   * (`tabs.SPLIT_VIEW_ID_NONE` / missing on older Chrome).
+   */
+  splitViewId?: number;
+}
+
+/** Chrome `tabs.SPLIT_VIEW_ID_NONE` — tab is not in a Split View. */
+const SPLIT_VIEW_ID_NONE = -1;
+
+function readSplitViewId(tab: { splitViewId?: number }): number | undefined {
+  const value = tab.splitViewId;
+  if (typeof value !== 'number' || value <= SPLIT_VIEW_ID_NONE) return undefined;
+  return value;
 }
 
 /**
@@ -45,6 +59,7 @@ export async function listOpenTabs(): Promise<OpenTab[]> {
         pinned: tab.pinned ?? false,
         muted: tab.mutedInfo?.muted ?? false,
         audible: tab.audible ?? false,
+        splitViewId: readSplitViewId(tab),
       });
     }
   }
@@ -75,6 +90,19 @@ export async function moveOpenTab(
   windowId: number,
 ): Promise<void> {
   await browser.tabs.move(tabId, { index, windowId });
+}
+
+/**
+ * Reorder one or more tabs. Prefer this over sequential `moveOpenTab` calls
+ * when the tabs should stay in the given relative order.
+ */
+export async function moveOpenTabs(
+  tabIds: number[],
+  index: number,
+  windowId: number,
+): Promise<void> {
+  if (tabIds.length === 0) return;
+  await browser.tabs.move(tabIds, { index, windowId });
 }
 
 /** Close a tab by id. List refresh is handled by `tabs.onRemoved` listeners. */

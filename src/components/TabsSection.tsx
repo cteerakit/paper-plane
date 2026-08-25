@@ -7,6 +7,8 @@ import {
   useRef,
   useState,
   type ErrorInfo,
+  type HTMLAttributes,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
 import {
@@ -85,6 +87,7 @@ import {
   createNewTab,
   listOpenTabs,
   moveOpenTab,
+  moveOpenTabs,
   normalizeTabUrl,
   renameOpenTabTitle,
   setTabMuted,
@@ -113,6 +116,13 @@ const OPEN_DROPPABLE_ID = 'open-drop-zone';
 /** Flat open-tab row — no card chrome; hover / active lighten via surface ladder. */
 const openTabRowClass =
   'group flex h-11 w-full touch-none cursor-default items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-surface-2';
+
+/** Combined Split View row: two (or more) panes share one strip height. */
+const splitRowClass =
+  'flex h-11 w-full touch-none cursor-default items-center overflow-hidden rounded-md';
+
+const splitPaneClass =
+  'group flex h-full min-w-0 flex-1 cursor-default items-center gap-2 px-2 text-left text-sm transition-colors hover:bg-surface-2';
 
 /** Matches open-tab row height (h-11); cursor-default with Ctrl/⌘T on hover. */
 const newTabButtonClass =
@@ -187,6 +197,77 @@ function groupTabsByWindow(tabs: OpenTab[]): { windowId: number; tabs: OpenTab[]
     }
   }
   return groups;
+}
+
+type OpenTabRow =
+  | { type: 'single'; tab: OpenTab }
+  | { type: 'split'; tabs: OpenTab[] };
+
+/** Collapse adjacent tabs that share a Chrome Split View into one visual row. */
+function groupTabsIntoRows(tabs: OpenTab[]): OpenTabRow[] {
+  const rows: OpenTabRow[] = [];
+  for (const tab of tabs) {
+    const prev = rows[rows.length - 1];
+    if (tab.splitViewId != null && prev) {
+      if (prev.type === 'split' && prev.tabs[0]?.splitViewId === tab.splitViewId) {
+        prev.tabs.push(tab);
+        continue;
+      }
+      if (prev.type === 'single' && prev.tab.splitViewId === tab.splitViewId) {
+        rows[rows.length - 1] = { type: 'split', tabs: [prev.tab, tab] };
+        continue;
+      }
+    }
+    rows.push({ type: 'single', tab });
+  }
+  return rows;
+}
+
+function rowTabs(row: OpenTabRow): OpenTab[] {
+  return row.type === 'split' ? row.tabs : [row.tab];
+}
+
+function rowPrimaryId(row: OpenTabRow): number {
+  return row.type === 'split' ? row.tabs[0]!.id : row.tab.id;
+}
+
+function unpinnedIndexOfRow(rows: OpenTabRow[], rowIndex: number): number {
+  let index = 0;
+  for (let i = 0; i < rowIndex; i++) {
+    index += rowTabs(rows[i]!).length;
+  }
+  return index;
+}
+
+/**
+ * Chrome unsplits a Split View if either of its tabs is moved away from the
+ * other. To reorder a split row, move the tabs *around* it instead.
+ */
+function moveAroundSplitRow(
+  rows: OpenTabRow[],
+  fromRow: number,
+  toRow: number,
+  pinnedCount: number,
+): { tabIds: number[]; index: number } | null {
+  if (fromRow === toRow) return null;
+
+  if (fromRow < toRow) {
+    const intervening = rows.slice(fromRow + 1, toRow + 1).flatMap(rowTabs);
+    if (intervening.length === 0) return null;
+    return {
+      tabIds: intervening.map((t) => t.id),
+      index: pinnedCount + unpinnedIndexOfRow(rows, fromRow),
+    };
+  }
+
+  const intervening = rows.slice(toRow, fromRow).flatMap(rowTabs);
+  if (intervening.length === 0) return null;
+  const splitStart = unpinnedIndexOfRow(rows, fromRow);
+  const splitLen = rowTabs(rows[fromRow]!).length;
+  return {
+    tabIds: intervening.map((t) => t.id),
+    index: pinnedCount + splitStart + splitLen - 1,
+  };
 }
 
 function FaviconIcon({
@@ -659,22 +740,35 @@ function RenameTabDialog({
   );
 }
 
-function SortableTabRow({
+const tabCloseButtonClass =
+  'text-muted-foreground hover:bg-surface-2 hover:text-foreground flex h-[1.875rem] w-0 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-md opacity-0 transition-[width,opacity] group-hover:w-[1.875rem] group-hover:opacity-100 focus-visible:w-[1.875rem] focus-visible:opacity-100 disabled:pointer-events-none';
+
+function TabPane({
   tab,
   disabled,
+  variant,
+  isDragging,
+  dragAttributes,
+  dragListeners,
   onActivate,
   onClose,
   onPin,
   onMute,
   onRename,
+  onRenamingChange,
 }: {
   tab: OpenTab;
   disabled: boolean;
+  variant: 'row' | 'pane';
+  isDragging?: boolean;
+  dragAttributes?: HTMLAttributes<HTMLElement>;
+  dragListeners?: Record<string, unknown>;
   onActivate: (tab: OpenTab) => void;
   onClose: (tab: OpenTab) => void;
   onPin: (tab: OpenTab) => void;
   onMute: (tab: OpenTab) => void;
   onRename: (tab: OpenTab, title: string) => void | Promise<void>;
+  onRenamingChange?: (renaming: boolean) => void;
 }) {
   const [isRenaming, setIsRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(tab.title);
@@ -686,16 +780,17 @@ function SortableTabRow({
   /** Ignore blur right after entering rename — menu teardown / focus thrash. */
   const ignoreBlurUntilRef = useRef(0);
 
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: tab.id,
-    data: { type: 'open-tab', tab },
-    disabled: isRenaming || disabled,
-  });
-
-  const { onPointerDown: dndPointerDown, ...dndListeners } = listeners ?? {};
+  const { onPointerDown: dndPointerDown, ...dndListeners } = dragListeners ?? {};
   const canRename = canRenameTabTitle(tab.url);
   const canCopyLink = Boolean(tab.url.trim());
   const rowBusy = disabled || renamingBusy;
+  const isPane = variant === 'pane';
+
+  useEffect(() => {
+    onRenamingChange?.(isRenaming);
+    // Parent callback identity is not stable (split row); only notify on the flag.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRenaming]);
 
   useEffect(() => {
     if (!isRenaming) return;
@@ -747,6 +842,210 @@ function SortableTabRow({
   }
 
   return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            isPane ? splitPaneClass : openTabRowClass,
+            tab.active && !isRenaming && 'bg-surface-3 hover:bg-surface-3',
+            !isPane && isDragging && 'cursor-grabbing opacity-40',
+            rowBusy && !isRenaming && 'pointer-events-none opacity-50',
+            isRenaming && 'bg-surface-1',
+          )}
+          {...dragAttributes}
+          {...(isRenaming || !dragListeners ? {} : dndListeners)}
+          onPointerDown={(event) => {
+            if (isRenaming) return;
+            // Primary button only — right-click opens the menu without starting a drag.
+            if (event.button !== 0) return;
+            if (typeof dndPointerDown === 'function') {
+              (dndPointerDown as (event: ReactPointerEvent<HTMLElement>) => void)(event);
+            }
+          }}
+          onClick={() => {
+            if (rowBusy || isRenaming) return;
+            void onActivate(tab);
+          }}
+        >
+          {isRenaming ? (
+            <>
+              <TabFavicon tab={tab} />
+              <input
+                ref={inputRef}
+                type="text"
+                aria-label="Rename tab"
+                value={draftTitle}
+                disabled={renamingBusy}
+                className={tabTitleInputClass}
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                }}
+                onChange={(event) => setDraftTitle(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    skipBlurCommitRef.current = true;
+                    void commitRename();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    cancelRename();
+                  }
+                }}
+                onBlur={() => {
+                  if (skipBlurCommitRef.current) {
+                    skipBlurCommitRef.current = false;
+                    return;
+                  }
+                  // Menu close / focus restore can blur the input in the same tick as mount.
+                  if (Date.now() < ignoreBlurUntilRef.current) {
+                    requestAnimationFrame(() => {
+                      inputRef.current?.focus();
+                    });
+                    return;
+                  }
+                  void commitRename();
+                }}
+              />
+            </>
+          ) : (
+            <TabRowContent tab={tab} />
+          )}
+          <div className="-mr-0.5 ml-auto flex shrink-0 items-center">
+            {(tab.audible || tab.muted) && !isRenaming && (
+              <button
+                type="button"
+                aria-label={tab.muted ? 'Unmute tab' : 'Mute tab'}
+                disabled={rowBusy}
+                className="text-muted-foreground hover:bg-surface-2 hover:text-foreground cursor-pointer rounded-md p-1.5 disabled:pointer-events-none"
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  event.preventDefault();
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  event.preventDefault();
+                  if (rowBusy) return;
+                  void onMute(tab);
+                }}
+              >
+                {tab.muted ? (
+                  <VolumeX className="size-4.5" strokeWidth={2.25} aria-hidden />
+                ) : (
+                  <Volume2 className="size-4.5" strokeWidth={2.25} aria-hidden />
+                )}
+              </button>
+            )}
+            <button
+              type="button"
+              aria-label="Close tab"
+              disabled={rowBusy || isRenaming}
+              className={tabCloseButtonClass}
+              onPointerDown={(event) => {
+                // Keep dnd-kit from starting a drag when pressing Close.
+                event.stopPropagation();
+                event.preventDefault();
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                if (rowBusy || isRenaming) return;
+                void onClose(tab);
+              }}
+            >
+              <X className="size-4.5 shrink-0" strokeWidth={2.25} aria-hidden />
+            </button>
+          </div>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent
+        onCloseAutoFocus={(event) => {
+          if (suppressCloseAutoFocusRef.current) {
+            event.preventDefault();
+            suppressCloseAutoFocusRef.current = false;
+          }
+        }}
+      >
+        <ContextMenuItem
+          className="cursor-pointer"
+          disabled={rowBusy || !canCopyLink}
+          onSelect={() => {
+            void copyTabUrl(tab.url);
+          }}
+        >
+          Copy Link
+        </ContextMenuItem>
+        <ContextMenuItem
+          className="cursor-pointer"
+          disabled={rowBusy || !canRename}
+          title={canRename ? undefined : 'Cannot rename this page'}
+          onSelect={() => {
+            beginRename();
+          }}
+        >
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem
+          className="cursor-pointer"
+          disabled={rowBusy}
+          onSelect={() => {
+            void onMute(tab);
+          }}
+        >
+          {tab.muted ? 'Unmute' : 'Mute'}
+        </ContextMenuItem>
+        <ContextMenuItem
+          className="cursor-pointer"
+          disabled={rowBusy}
+          onSelect={() => {
+            void onPin(tab);
+          }}
+        >
+          Pin Tab
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          variant="destructive"
+          className="cursor-pointer"
+          disabled={rowBusy || isRenaming}
+          onSelect={() => {
+            void onClose(tab);
+          }}
+        >
+          Close Tab
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+function SortableTabRow({
+  tab,
+  disabled,
+  onActivate,
+  onClose,
+  onPin,
+  onMute,
+  onRename,
+}: {
+  tab: OpenTab;
+  disabled: boolean;
+  onActivate: (tab: OpenTab) => void;
+  onClose: (tab: OpenTab) => void;
+  onPin: (tab: OpenTab) => void;
+  onMute: (tab: OpenTab) => void;
+  onRename: (tab: OpenTab, title: string) => void | Promise<void>;
+}) {
+  const [isRenaming, setIsRenaming] = useState(false);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: tab.id,
+    data: { type: 'open-tab', tab },
+    disabled: isRenaming || disabled,
+  });
+
+  return (
     <li
       ref={setNodeRef}
       style={{
@@ -755,180 +1054,98 @@ function SortableTabRow({
       }}
       className={cn(isDragging && 'relative z-10')}
     >
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div
-            className={cn(
-              openTabRowClass,
-              tab.active && !isRenaming && 'bg-surface-3 hover:bg-surface-3',
-              isDragging && 'cursor-grabbing opacity-40',
-              rowBusy && !isRenaming && 'pointer-events-none opacity-50',
-              isRenaming && 'bg-surface-1',
-            )}
-            {...attributes}
-            {...(isRenaming ? {} : dndListeners)}
-            onPointerDown={(event) => {
-              if (isRenaming) return;
-              // Primary button only — right-click opens the menu without starting a drag.
-              if (event.button !== 0) return;
-              dndPointerDown?.(event);
-            }}
-            onClick={() => {
-              if (rowBusy || isRenaming) return;
-              void onActivate(tab);
-            }}
-          >
-            {isRenaming ? (
-              <>
-                <TabFavicon tab={tab} />
-                <input
-                  ref={inputRef}
-                  type="text"
-                  aria-label="Rename tab"
-                  value={draftTitle}
-                  disabled={renamingBusy}
-                  className={tabTitleInputClass}
-                  onClick={(event) => event.stopPropagation()}
-                  onPointerDown={(event) => {
-                    event.stopPropagation();
-                  }}
-                  onChange={(event) => setDraftTitle(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      skipBlurCommitRef.current = true;
-                      void commitRename();
-                    } else if (event.key === 'Escape') {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      cancelRename();
-                    }
-                  }}
-                  onBlur={() => {
-                    if (skipBlurCommitRef.current) {
-                      skipBlurCommitRef.current = false;
-                      return;
-                    }
-                    // Menu close / focus restore can blur the input in the same tick as mount.
-                    if (Date.now() < ignoreBlurUntilRef.current) {
-                      requestAnimationFrame(() => {
-                        inputRef.current?.focus();
-                      });
-                      return;
-                    }
-                    void commitRename();
-                  }}
-                />
-              </>
-            ) : (
-              <TabRowContent tab={tab} />
-            )}
-            <div className="-mr-0.5 ml-auto flex shrink-0 items-center">
-              {(tab.audible || tab.muted) && !isRenaming && (
-                <button
-                  type="button"
-                  aria-label={tab.muted ? 'Unmute tab' : 'Mute tab'}
-                  disabled={rowBusy}
-                  className="text-muted-foreground hover:bg-surface-2 hover:text-foreground cursor-pointer rounded-md p-1.5 disabled:pointer-events-none"
-                  onPointerDown={(event) => {
-                    event.stopPropagation();
-                    event.preventDefault();
-                  }}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    event.preventDefault();
-                    if (rowBusy) return;
-                    void onMute(tab);
-                  }}
-                >
-                  {tab.muted ? (
-                    <VolumeX className="size-4.5" strokeWidth={2.25} aria-hidden />
-                  ) : (
-                    <Volume2 className="size-4.5" strokeWidth={2.25} aria-hidden />
-                  )}
-                </button>
-              )}
-              <button
-                type="button"
-                aria-label="Close tab"
-                disabled={rowBusy || isRenaming}
-                className="text-muted-foreground hover:bg-surface-2 hover:text-foreground flex h-[1.875rem] w-0 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-md opacity-0 transition-[width,opacity] group-hover:w-[1.875rem] group-hover:opacity-100 focus-visible:w-[1.875rem] focus-visible:opacity-100 disabled:pointer-events-none"
-                onPointerDown={(event) => {
-                  // Keep dnd-kit from starting a drag when pressing Close.
-                  event.stopPropagation();
-                  event.preventDefault();
-                }}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  event.preventDefault();
-                  if (rowBusy || isRenaming) return;
-                  void onClose(tab);
-                }}
-              >
-                <X className="size-4.5 shrink-0" strokeWidth={2.25} aria-hidden />
-              </button>
-            </div>
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent
-          onCloseAutoFocus={(event) => {
-            if (suppressCloseAutoFocusRef.current) {
-              event.preventDefault();
-              suppressCloseAutoFocusRef.current = false;
-            }
-          }}
-        >
-          <ContextMenuItem
-            className="cursor-pointer"
-            disabled={rowBusy || !canCopyLink}
-            onSelect={() => {
-              void copyTabUrl(tab.url);
-            }}
-          >
-            Copy Link
-          </ContextMenuItem>
-          <ContextMenuItem
-            className="cursor-pointer"
-            disabled={rowBusy || !canRename}
-            title={canRename ? undefined : 'Cannot rename this page'}
-            onSelect={() => {
-              beginRename();
-            }}
-          >
-            Rename
-          </ContextMenuItem>
-          <ContextMenuItem
-            className="cursor-pointer"
-            disabled={rowBusy}
-            onSelect={() => {
-              void onMute(tab);
-            }}
-          >
-            {tab.muted ? 'Unmute' : 'Mute'}
-          </ContextMenuItem>
-          <ContextMenuItem
-            className="cursor-pointer"
-            disabled={rowBusy}
-            onSelect={() => {
-              void onPin(tab);
-            }}
-          >
-            Pin Tab
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem
-            variant="destructive"
-            className="cursor-pointer"
-            disabled={rowBusy || isRenaming}
-            onSelect={() => {
-              void onClose(tab);
-            }}
-          >
-            Close Tab
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
+      <TabPane
+        tab={tab}
+        disabled={disabled}
+        variant="row"
+        isDragging={isDragging}
+        dragAttributes={attributes}
+        dragListeners={listeners as Record<string, unknown> | undefined}
+        onActivate={onActivate}
+        onClose={onClose}
+        onPin={onPin}
+        onMute={onMute}
+        onRename={onRename}
+        onRenamingChange={setIsRenaming}
+      />
+    </li>
+  );
+}
+
+function SortableSplitTabRow({
+  tabs,
+  disabled,
+  onActivate,
+  onClose,
+  onPin,
+  onMute,
+  onRename,
+}: {
+  tabs: OpenTab[];
+  disabled: boolean;
+  onActivate: (tab: OpenTab) => void;
+  onClose: (tab: OpenTab) => void;
+  onPin: (tab: OpenTab) => void;
+  onMute: (tab: OpenTab) => void;
+  onRename: (tab: OpenTab, title: string) => void | Promise<void>;
+}) {
+  const primary = tabs[0]!;
+  const [renaming, setRenaming] = useState(false);
+  const renamingPanesRef = useRef(new Set<number>());
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: primary.id,
+    data: { type: 'open-tab', tab: primary, splitTabs: tabs },
+    disabled: renaming || disabled,
+  });
+
+  const { onPointerDown: dndPointerDown, ...dndListeners } = listeners ?? {};
+
+  function handlePaneRenamingChange(tabId: number, next: boolean) {
+    if (next) renamingPanesRef.current.add(tabId);
+    else renamingPanesRef.current.delete(tabId);
+    setRenaming(renamingPanesRef.current.size > 0);
+  }
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition: isDragging ? 'none' : transition,
+      }}
+      className={cn(isDragging && 'relative z-10')}
+      aria-label={`Split view: ${tabs.map((t) => t.title).join(' and ')}`}
+    >
+      <div
+        className={cn(
+          splitRowClass,
+          isDragging && 'cursor-grabbing opacity-40',
+          disabled && 'pointer-events-none opacity-50',
+        )}
+        {...attributes}
+        {...(renaming ? {} : dndListeners)}
+        onPointerDown={(event) => {
+          if (renaming) return;
+          if (event.button !== 0) return;
+          dndPointerDown?.(event);
+        }}
+      >
+        {tabs.map((tab) => (
+          <TabPane
+            key={tab.id}
+            tab={tab}
+            disabled={disabled}
+            variant="pane"
+            onActivate={onActivate}
+            onClose={onClose}
+            onPin={onPin}
+            onMute={onMute}
+            onRename={onRename}
+            onRenamingChange={(next) => handlePaneRenamingChange(tab.id, next)}
+          />
+        ))}
+      </div>
     </li>
   );
 }
@@ -1388,11 +1605,21 @@ function TabsSectionInner({
     const activeTab = tabs.find((t) => t.active);
     if (!activeTab) return;
 
-    const toClose = tabs.filter((t) => !t.pinned && t.id !== activeTab.id);
+    const toClose = tabs.filter((t) => {
+      if (t.pinned || t.id === activeTab.id) return false;
+      // Keep the other half of an active Split View — clearing it would unsplit.
+      if (
+        activeTab.splitViewId != null &&
+        t.splitViewId === activeTab.splitViewId
+      ) {
+        return false;
+      }
+      return true;
+    });
     if (toClose.length === 0) return;
 
     const keepIds = new Set(
-      tabs.filter((t) => t.pinned || t.id === activeTab.id).map((t) => t.id),
+      tabs.filter((t) => !toClose.some((c) => c.id === t.id)).map((t) => t.id),
     );
     setTabs((prev) => prev.filter((t) => keepIds.has(t.id)));
     try {
@@ -1615,11 +1842,19 @@ function TabsSectionInner({
     const windowTabs = tabs.filter((t) => t.windowId === draggedTab.windowId);
     const pinnedCount = windowTabs.filter((t) => t.pinned).length;
     const unpinnedWindowTabs = windowTabs.filter((t) => !t.pinned);
-    const oldIndex = unpinnedWindowTabs.findIndex((t) => t.id === draggedTab.id);
-    const newIndex = unpinnedWindowTabs.findIndex((t) => t.id === overTab.id);
-    if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return;
+    const rows = groupTabsIntoRows(unpinnedWindowTabs);
+    const oldRowIndex = rows.findIndex((r) => rowTabs(r).some((t) => t.id === draggedTab.id));
+    const newRowIndex = rows.findIndex((r) => rowTabs(r).some((t) => t.id === overTab.id));
+    if (oldRowIndex < 0 || newRowIndex < 0 || oldRowIndex === newRowIndex) return;
+
+    const draggedRow = rows[oldRowIndex]!;
+    const nextUnpinned = arrayMove(rows, oldRowIndex, newRowIndex).flatMap(rowTabs);
+    const chromeIndex =
+      pinnedCount + nextUnpinned.findIndex((t) => t.id === rowPrimaryId(draggedRow));
+    if (chromeIndex < pinnedCount) return;
 
     // Optimistic reorder among unpinned only; Chrome index includes leading pinned tabs.
+    // Split pairs move as one row so they stay adjacent.
     setTabs((prev) => {
       const next: OpenTab[] = [];
       for (const group of groupTabsByWindow(prev)) {
@@ -1628,15 +1863,28 @@ function TabsSectionInner({
           continue;
         }
         const pinned = group.tabs.filter((t) => t.pinned);
-        const unpinned = group.tabs.filter((t) => !t.pinned);
-        next.push(...pinned, ...arrayMove(unpinned, oldIndex, newIndex));
+        next.push(...pinned, ...nextUnpinned);
       }
       return next;
     });
 
     void (async () => {
       try {
-        await moveOpenTab(draggedTab.id, pinnedCount + newIndex, draggedTab.windowId);
+        if (draggedRow.type === 'split') {
+          // Do not tabs.move the split pair — Chrome unsplits as soon as one
+          // half is moved away from the other. Shift the surrounding tabs.
+          const around = moveAroundSplitRow(
+            rows,
+            oldRowIndex,
+            newRowIndex,
+            pinnedCount,
+          );
+          if (around) {
+            await moveOpenTabs(around.tabIds, around.index, draggedTab.windowId);
+          }
+        } else {
+          await moveOpenTabs([draggedTab.id], chromeIndex, draggedTab.windowId);
+        }
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not reorder tab');
@@ -1658,8 +1906,25 @@ function TabsSectionInner({
   const pinnedStretch = pinnedSlotCount <= 4;
   // Hide when empty; show while dragging an open (unpinned) tab so drop-to-pin works.
   const showPinnedSection = pinnedTabs.length > 0 || isDraggingUnpinned;
-  const canClearTabs =
-    tabs.some((t) => t.active) && tabs.some((t) => !t.pinned && !t.active);
+  const canClearTabs = tabs.some((t) => {
+    if (t.pinned || t.active) return false;
+    const activeTab = tabs.find((x) => x.active);
+    if (!activeTab) return false;
+    if (
+      activeTab.splitViewId != null &&
+      t.splitViewId === activeTab.splitViewId
+    ) {
+      return false;
+    }
+    return true;
+  });
+  const dragSplitTabs = useMemo(() => {
+    if (!activeDragTab || activeDragTab.pinned || activeDragTab.splitViewId == null) {
+      return null;
+    }
+    const pair = openTabs.filter((t) => t.splitViewId === activeDragTab.splitViewId);
+    return pair.length > 1 ? pair : null;
+  }, [activeDragTab, openTabs]);
 
   if (!enabled) return null;
 
@@ -1779,7 +2044,9 @@ function TabsSectionInner({
                 )}
                 {openTabs.length > 0 && (
                   <div className="flex flex-col gap-3">
-                    {tabGroups.map((group, groupIndex) => (
+                    {tabGroups.map((group, groupIndex) => {
+                      const rows = groupTabsIntoRows(group.tabs);
+                      return (
                       <div key={group.windowId} className="flex flex-col gap-0.5">
                         {showWindowHeadings && (
                           <p className="text-muted-foreground px-1 text-[11px] font-medium tracking-wide uppercase">
@@ -1787,26 +2054,44 @@ function TabsSectionInner({
                           </p>
                         )}
                         <SortableContext
-                          items={group.tabs.map((t) => t.id)}
+                          items={rows.map(rowPrimaryId)}
                           strategy={verticalListSortingStrategy}
                         >
                           <ul className="flex flex-col gap-0.5">
-                            {group.tabs.map((tab) => (
-                              <SortableTabRow
-                                key={tab.id}
-                                tab={tab}
-                                disabled={closingId === tab.id || pinningId === tab.id}
-                                onActivate={handleActivate}
-                                onClose={handleCloseTab}
-                                onPin={handlePinTab}
-                                onMute={handleMuteTab}
-                                onRename={handleRenameTab}
-                              />
-                            ))}
+                            {rows.map((row) =>
+                              row.type === 'split' ? (
+                                <SortableSplitTabRow
+                                  key={row.tabs[0]!.id}
+                                  tabs={row.tabs}
+                                  disabled={row.tabs.some(
+                                    (t) => t.id === closingId || t.id === pinningId,
+                                  )}
+                                  onActivate={handleActivate}
+                                  onClose={handleCloseTab}
+                                  onPin={handlePinTab}
+                                  onMute={handleMuteTab}
+                                  onRename={handleRenameTab}
+                                />
+                              ) : (
+                                <SortableTabRow
+                                  key={row.tab.id}
+                                  tab={row.tab}
+                                  disabled={
+                                    closingId === row.tab.id || pinningId === row.tab.id
+                                  }
+                                  onActivate={handleActivate}
+                                  onClose={handleCloseTab}
+                                  onPin={handlePinTab}
+                                  onMute={handleMuteTab}
+                                  onRename={handleRenameTab}
+                                />
+                              ),
+                            )}
                           </ul>
                         </SortableContext>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
                 {newTabPosition === 'bottom' && newTabControl}
@@ -1829,6 +2114,25 @@ function TabsSectionInner({
                   >
                     <TabFavicon tab={activeDragTab} />
                   </Button>
+                ) : dragSplitTabs ? (
+                  <div
+                    className={cn(
+                      splitRowClass,
+                      'w-72 cursor-grabbing bg-surface-1 shadow-md',
+                    )}
+                  >
+                    {dragSplitTabs.map((tab) => (
+                      <div
+                        key={tab.id}
+                        className={cn(
+                          splitPaneClass,
+                          tab.active && 'bg-surface-3',
+                        )}
+                      >
+                        <TabRowContent tab={tab} />
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <div
                     className={cn(
