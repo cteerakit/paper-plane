@@ -429,13 +429,56 @@ export function canRenameTabTitle(url: string): boolean {
 }
 
 /**
+ * Origin match pattern for `permissions.request` / `executeScript` host access.
+ * Returns `null` when the URL is not a normal http(s) page.
+ */
+function tabOriginPattern(url: string): string | null {
+  if (!canRenameTabTitle(url)) return null;
+  try {
+    const { protocol, host } = new URL(url);
+    return `${protocol}//${host}/*`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ensure we have host access for this tab’s origin (optional_host_permissions).
+ * Must run from a user gesture. Returns false if the user denies the prompt.
+ */
+async function ensureTabHostAccess(url: string): Promise<boolean> {
+  const origin = tabOriginPattern(url);
+  if (!origin) return false;
+
+  const already = await browser.permissions.contains({ origins: [origin] });
+  if (already) return true;
+
+  try {
+    return await browser.permissions.request({ origins: [origin] });
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Set the tab’s document title via scripting (Chrome has no `tabs.update({ title })`).
- * Requires the `scripting` permission and host access for the tab’s URL.
+ * Requires `scripting` plus host access for the tab’s URL (requested on demand).
  */
 export async function renameOpenTabTitle(tabId: number, title: string): Promise<void> {
   const next = title.trim();
   if (!next) {
     throw new Error('Title cannot be empty');
+  }
+
+  const tab = await browser.tabs.get(tabId);
+  const pageUrl = tab.url ?? '';
+  if (!canRenameTabTitle(pageUrl)) {
+    throw new Error('Cannot rename this page');
+  }
+
+  const granted = await ensureTabHostAccess(pageUrl);
+  if (!granted) {
+    throw new Error('Permission needed to rename this page');
   }
 
   try {
